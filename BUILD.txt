@@ -1,0 +1,14 @@
+Cursor agent sandbox cannot be fully disabled on this machine (userns EINVAL),
+so APK builds must run in a normal terminal as your user.
+
+1) One-time Flutter (you already have ~/flutter — just fix ownership if needed):
+   sudo chown -R "$USER:$USER" ~/flutter
+   # optional: also install via AUR later with: yay -S flutter
+
+2) NDK (needed once) — in a normal terminal:
+   yes | sdkmanager --install "ndk;27.0.12077973"
+   # sdkmanager is at: ~/Android/Sdk/cmdline-tools/latest/bin/sdkmanager
+
+3) Build + install to Pixel 6a:
+   cd ~/Personal-cloud/projects/software/wheelshot
+   ./scripts/build-apk.sh
