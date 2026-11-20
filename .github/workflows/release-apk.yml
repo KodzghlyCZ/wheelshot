@@ -36,6 +36,29 @@ jobs:
       - name: Dependencies
         run: flutter pub get
 
+      # Same keystore every build, or Android refuses to install the new APK
+      # over the old one. Create once, then:
+      #   gh secret set ANDROID_KEYSTORE_BASE64 < upload-keystore.jks.b64
+      #   gh secret set ANDROID_KEYSTORE_PASSWORD
+      #   gh secret set ANDROID_KEY_ALIAS
+      #   gh secret set ANDROID_KEY_PASSWORD
+      - name: Release signing
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          if [ -n "$ANDROID_KEYSTORE_BASE64" ]; then
+            echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/upload-keystore.jks"
+            echo "ANDROID_KEYSTORE_PATH=$RUNNER_TEMP/upload-keystore.jks" >> "$GITHUB_ENV"
+            echo "ANDROID_KEYSTORE_PASSWORD=$ANDROID_KEYSTORE_PASSWORD" >> "$GITHUB_ENV"
+            echo "ANDROID_KEY_ALIAS=$ANDROID_KEY_ALIAS" >> "$GITHUB_ENV"
+            echo "ANDROID_KEY_PASSWORD=$ANDROID_KEY_PASSWORD" >> "$GITHUB_ENV"
+          else
+            echo "No ANDROID_KEYSTORE_BASE64 secret. APK is debug-signed and will not update in place."
+          fi
+
       - name: Build release APK
         run: flutter build apk --release --android-skip-build-dependency-validation
 
@@ -62,6 +85,8 @@ jobs:
             echo "tag=build-${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
             echo "name=WheelShot build ${GITHUB_RUN_NUMBER} (${short})" >> "$GITHUB_OUTPUT"
           fi
+          ver=$(awk '/^version:/ {print $2; exit}' pubspec.yaml)
+          echo "version=$ver" >> "$GITHUB_OUTPUT"
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
@@ -73,6 +98,8 @@ jobs:
           prerelease: false
           make_latest: true
           body: |
+            version: ${{ steps.meta.outputs.version }}
+
             ### Download
 
             [wheelshot.apk](https://github.com/${{ github.repository }}/releases/download/${{ steps.meta.outputs.tag }}/wheelshot.apk)

@@ -1,9 +1,13 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../route_observer.dart';
 import '../models/shoot_plan.dart';
+import '../services/app_update.dart';
 import '../services/session_store.dart';
 import '../widgets/past_shoot_strip.dart';
+import '../widgets/update_available_button.dart';
 import 'past_shoots_screen.dart';
 import 'setup_screen.dart';
 
@@ -14,13 +18,22 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> with RouteAware {
+class _HomeScreenState extends State<HomeScreen>
+    with RouteAware, WidgetsBindingObserver {
+  static const _updateEvery = Duration(minutes: 15);
+
   late Future<List<PastSession>> _past;
+  AppUpdateOffer? _update;
+  Timer? _updateTimer;
+  var _checking = false;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _past = SessionStore.listPastSessions();
+    _checkUpdate();
+    _updateTimer = Timer.periodic(_updateEvery, (_) => _checkUpdate());
   }
 
   @override
@@ -32,8 +45,15 @@ class _HomeScreenState extends State<HomeScreen> with RouteAware {
 
   @override
   void dispose() {
+    _updateTimer?.cancel();
+    WidgetsBinding.instance.removeObserver(this);
     routeObserver.unsubscribe(this);
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) _checkUpdate();
   }
 
   /// Setup is replaced by the wizard, so the push from home completes
@@ -49,6 +69,29 @@ class _HomeScreenState extends State<HomeScreen> with RouteAware {
       _past = next;
     });
     await next;
+    await _checkUpdate();
+  }
+
+  Future<void> _checkUpdate() async {
+    if (_checking) return;
+    _checking = true;
+    try {
+      final offer = await AppUpdate.check();
+      if (!mounted) return;
+      setState(() => _update = offer);
+    } finally {
+      _checking = false;
+    }
+  }
+
+  Future<void> _openUpdate() async {
+    final offer = _update;
+    if (offer == null) return;
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (_) => UpdateOfferSheet(offer: offer),
+    );
   }
 
   Future<void> _editMenu(PastSession s) async {
@@ -71,21 +114,26 @@ class _HomeScreenState extends State<HomeScreen> with RouteAware {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      appBar: AppBar(
+        title: Text(
+          'WheelShot',
+          style: Theme.of(context).textTheme.headlineLarge?.copyWith(
+                fontWeight: FontWeight.w800,
+                letterSpacing: -0.5,
+              ),
+        ),
+        toolbarHeight: 72,
+        actions: [
+          if (_update != null) UpdateAvailableButton(onPressed: _openUpdate),
+        ],
+      ),
       body: SafeArea(
         child: RefreshIndicator(
           onRefresh: _reload,
           child: ListView(
             physics: const AlwaysScrollableScrollPhysics(),
-            padding: const EdgeInsets.fromLTRB(20, 28, 20, 20),
+            padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
             children: [
-              Text(
-                'WheelShot',
-                style: Theme.of(context).textTheme.headlineLarge?.copyWith(
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: -0.5,
-                    ),
-              ),
-              const SizedBox(height: 8),
               Text(
                 'Guided photos for tires & rims. Pick what you’re shooting.',
                 style: Theme.of(context).textTheme.bodyLarge?.copyWith(

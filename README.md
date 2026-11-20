@@ -32,6 +32,8 @@ Every push to `main` publishes a release APK. [Releases](https://github.com/Kodz
 2. Download `wheelshot.apk`
 3. Install on Android (allow unknown sources if prompted)
 
+After that install, the home screen checks this release on open, on resume, and about every 15 minutes. A newer build number in the `version:` line shows an update icon at the top right, with an orange dot. Tap it to download and install.
+
 ### From source (USB)
 
 ```bash
