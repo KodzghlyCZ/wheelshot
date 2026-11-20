@@ -2,13 +2,16 @@ import 'package:flutter/material.dart';
 
 import '../data/rim_catalog.dart';
 import '../data/tire_catalog.dart';
+import '../data/tire_size.dart';
 import '../data/tire_size_combos.dart';
 import '../models/session_specs.dart';
 import '../models/shoot_plan.dart';
 import '../services/session_store.dart';
 import '../widgets/confirm_leave.dart';
 import '../widgets/inline_dial.dart';
+import '../widgets/rim_spec_selectors.dart';
 import '../widgets/suggest_field.dart';
+import '../widgets/tire_size_selector.dart';
 import 'done_screen.dart';
 
 class SpecsScreen extends StatefulWidget {
@@ -29,24 +32,11 @@ class _SpecsScreenState extends State<SpecsScreen> {
   ShootCategory get _cat => widget.store.category;
   ShootConfig? get _config => widget.store.config;
 
-  static const _tirePrefixes = ['', 'T'];
-  static const _tireConstructions = ['R', 'ZR', 'B', 'D'];
-  static final _tireWidths = [for (var w = 125; w <= 335; w += 5) w];
-  static final _tireAspects = [for (var a = 25; a <= 100; a += 5) a];
-  static final _tireDiameters = [for (var d = 13; d <= 23; d++) d];
-  static final _rimWidths = [
-    for (var w = 4.0; w <= 12.0 + 0.01; w += 0.5) (w * 10).round() / 10,
-  ];
-  static final _rimDiameters = [for (var d = 13; d <= 23; d++) d];
-  static final _etValues = [for (var e = -25; e <= 70; e++) e];
   static final _treadValues = [
     for (var t = 0; t <= 20; t++) t / 2,
   ];
   static final _dotWeeks = [for (var w = 1; w <= 53; w++) w];
   static final _dotYears = [for (var y = 0; y <= 26; y++) y];
-  /// null = unset (shown as —)
-  static final _cbValues = <double?>[null, ...kCommonCenterBores];
-
   @override
   void initState() {
     super.initState();
@@ -68,9 +58,9 @@ class _SpecsScreenState extends State<SpecsScreen> {
       }
     }
     for (final r in _rims) {
-      r.width = _nearestDouble(_rimWidths, r.width);
-      if (!_rimDiameters.contains(r.diameter)) r.diameter = 18;
-      if (!_etValues.contains(r.et)) r.et = 35;
+      r.width = _nearestDouble(kRimWidths, r.width);
+      if (!kRimDiameters.contains(r.diameter)) r.diameter = 18;
+      if (!kEtValues.contains(r.et)) r.et = 35;
       if (!kPcdBoltCounts.contains(r.pcdBolts)) r.pcdBolts = 5;
       r.pcdDiameter = _nearestDouble(kPcdDiameters, r.pcdDiameter);
       if (r.centerBore != null) {
@@ -78,10 +68,12 @@ class _SpecsScreenState extends State<SpecsScreen> {
       }
     }
     for (final t in _tires) {
-      if (!_tireWidths.contains(t.width)) t.width = 225;
-      if (!_tireAspects.contains(t.aspect)) t.aspect = 40;
-      if (!_tireDiameters.contains(t.diameter)) t.diameter = 18;
-      if (!_tireConstructions.contains(t.construction)) t.construction = 'R';
+      if (!kTireWidths.contains(t.width)) t.width = 225;
+      if (!kTireAspects.contains(t.aspect)) t.aspect = 40;
+      if (!kTireDiameters.contains(t.diameter)) t.diameter = 18;
+      if (!kTireConstructions.contains(t.construction)) t.construction = 'R';
+      if (!kTirePrefixes.contains(t.prefix)) t.prefix = '';
+      if (!kTireSuffixes.contains(t.suffix)) t.suffix = '';
       t.treadMm = _nearestDouble(_treadValues, t.treadMm);
     }
 
@@ -127,17 +119,19 @@ class _SpecsScreenState extends State<SpecsScreen> {
     final et = RegExp(r'-?\d+').firstMatch(r.et);
     if (et != null) {
       final v = int.tryParse(et.group(0)!);
-      if (v != null && _etValues.contains(v)) c.et = v;
+      if (v != null && kEtValues.contains(v)) c.et = v;
     }
 
-    final size = RegExp(r'(\d+(?:[.,]\d+)?)\s*J?\s*[x×]\s*(\d+)',
-            caseSensitive: false)
-        .firstMatch(r.size);
+    final size =
+        RegExp(r'(\d+(?:[.,]\d+)?)\s*J?\s*[x×]\s*(\d+)', caseSensitive: false)
+            .firstMatch(r.size);
     if (size != null) {
       final w = double.tryParse(size.group(1)!.replaceAll(',', '.'));
       final d = int.tryParse(size.group(2)!);
-      if (w != null && d != null && _rimWidths.contains(w) &&
-          _rimDiameters.contains(d)) {
+      if (w != null &&
+          d != null &&
+          kRimWidths.contains(w) &&
+          kRimDiameters.contains(d)) {
         c.width = w;
         c.diameter = d;
         c.diameterSet = true;
@@ -171,30 +165,16 @@ class _SpecsScreenState extends State<SpecsScreen> {
     if (t.brand.isNotEmpty) c.brand.text = t.brand;
     if (t.model.isNotEmpty) c.model.text = t.model;
 
-    final size = RegExp(
-      r'(T?)(\d+)/(\d+)\s*(ZR|R|B|D)?\s*(\d+)',
-      caseSensitive: false,
-    ).firstMatch(t.size);
+    final size = tryParseTireSize(t.size);
     if (size != null) {
-      final prefix = size.group(1)!.toUpperCase();
-      final w = int.parse(size.group(2)!);
-      final a = int.parse(size.group(3)!);
-      final k = (size.group(4) ?? 'R').toUpperCase();
-      final d = int.parse(size.group(5)!);
-      if (_tireWidths.contains(w) &&
-          _tireAspects.contains(a) &&
-          _tireDiameters.contains(d) &&
-          _tireConstructions.contains(k)) {
-        c.prefix = prefix;
-        c.width = w;
-        c.aspect = a;
-        c.construction = k;
-        c.diameter = d;
-        c.diameterSet = true;
-        c.sizeManual = null;
-      } else {
-        c.sizeManual = t.size.trim();
-      }
+      c.prefix = size.prefix;
+      c.width = size.width;
+      c.aspect = size.aspect;
+      c.construction = size.construction;
+      c.diameter = size.diameter;
+      c.suffix = size.suffix;
+      c.diameterSet = true;
+      c.sizeManual = null;
     } else if (t.size.trim().isNotEmpty) {
       c.sizeManual = t.size.trim();
     }
@@ -239,10 +219,10 @@ class _SpecsScreenState extends State<SpecsScreen> {
   /// Width changed: pick usual aspect; Ø only if this tire Ø still unset.
   void _onTireWidth(_TireControllers c, int w) {
     c.width = w;
-    c.aspect = _nearestInt(_tireAspects, preferredAspectForWidth(w));
+    c.aspect = _nearestInt(kTireAspects, preferredAspectForWidth(w));
     if (!c.diameterSet) {
       c.diameter =
-          _nearestInt(_tireDiameters, preferredDiameterFor(w, c.aspect));
+          _nearestInt(kTireDiameters, preferredDiameterFor(w, c.aspect));
     }
   }
 
@@ -251,27 +231,27 @@ class _SpecsScreenState extends State<SpecsScreen> {
     c.aspect = a;
     if (!c.diameterSet) {
       c.diameter =
-          _nearestInt(_tireDiameters, preferredDiameterFor(c.width, a));
+          _nearestInt(kTireDiameters, preferredDiameterFor(c.width, a));
     }
   }
 
   /// Mark this tire Ø set; copy to unset rims/tires (fitted set = same Ø).
   void _setTireDiameter(_TireControllers c, int d) {
-    c.diameter = _nearestInt(_tireDiameters, d);
+    c.diameter = _nearestInt(kTireDiameters, d);
     c.diameterSet = true;
     _syncUnsetDiameters(c.diameter);
   }
 
   /// Mark this rim Ø set; copy to unset rims/tires.
   void _setRimDiameter(_RimControllers c, int d) {
-    c.diameter = _nearestInt(_rimDiameters, d);
+    c.diameter = _nearestInt(kRimDiameters, d);
     c.diameterSet = true;
     _syncUnsetDiameters(c.diameter);
   }
 
   void _syncUnsetDiameters(int d) {
-    final rimD = _nearestInt(_rimDiameters, d);
-    final tireD = _nearestInt(_tireDiameters, d);
+    final rimD = _nearestInt(kRimDiameters, d);
+    final tireD = _nearestInt(kTireDiameters, d);
     for (final r in _rims) {
       if (!r.diameterSet) r.diameter = rimD;
     }
@@ -512,10 +492,11 @@ class _SpecsScreenState extends State<SpecsScreen> {
             }),
           ),
           const SizedBox(height: 12),
-          DialStrip(
-            label: 'PCD / rozteč',
-            manualHint: 'e.g. 5x112',
-            dialText: () => formatPcd(c.pcdBolts, c.pcdDiameter),
+          PcdSelector(
+            bolts: c.pcdBolts,
+            diameter: c.pcdDiameter,
+            onBoltsChanged: (b) => setState(() => c.pcdBolts = b),
+            onDiameterChanged: (d) => setState(() => c.pcdDiameter = d),
             onResetToDefaults: () => setState(c.resetPcdDefaults),
             onManualChanged: (v) => setState(() => c.pcdManual = v),
             onDuplicate: _dup(i, () {
@@ -525,29 +506,17 @@ class _SpecsScreenState extends State<SpecsScreen> {
                 c.pcdManual = prev.pcdManual;
               });
             }),
-            children: [
-              InlineDial<int>(
-                values: kPcdBoltCounts,
-                value: c.pcdBolts,
-                width: 52,
-                labelOf: (b) => '$b',
-                onChanged: (b) => setState(() => c.pcdBolts = b),
-              ),
-              const DialSep('x'),
-              InlineDial<double>(
-                values: kPcdDiameters,
-                value: c.pcdDiameter,
-                width: 80,
-                labelOf: _fmtPcdMm,
-                onChanged: (d) => setState(() => c.pcdDiameter = d),
-              ),
-            ],
           ),
           const SizedBox(height: 12),
-          DialStrip(
-            label: 'Rim size + ET',
-            manualHint: 'e.g. 7.5Jx17 ET47',
-            dialText: () => '${c.sizeLabel} ET${c.et}',
+          RimSizeSelector(
+            width: c.width,
+            diameter: c.diameter,
+            et: c.et,
+            centerBore: c.centerBore,
+            onWidthChanged: (w) => setState(() => c.width = w),
+            onDiameterChanged: (d) => setState(() => _setRimDiameter(c, d)),
+            onEtChanged: (e) => setState(() => c.et = e),
+            onCenterBoreChanged: (v) => setState(() => c.centerBore = v),
             onResetToDefaults: () => setState(c.resetSizeEtDefaults),
             onManualChanged: (v) => setState(() => c.sizeEtManual = v),
             onDuplicate: _dup(i, () {
@@ -555,82 +524,24 @@ class _SpecsScreenState extends State<SpecsScreen> {
                 c.width = prev!.width;
                 c.diameter = prev.diameter;
                 c.et = prev.et;
+                c.centerBore = prev.centerBore;
                 c.sizeEtManual = prev.sizeEtManual;
-              });
-            }),
-            children: [
-              InlineDial<double>(
-                values: _rimWidths,
-                value: c.width,
-                width: 56,
-                labelOf: (w) =>
-                    w == w.roundToDouble() ? '${w.toInt()}' : '$w',
-                onChanged: (w) => setState(() => c.width = w),
-              ),
-              const DialSep('Jx'),
-              InlineDial<int>(
-                values: _rimDiameters,
-                value: c.diameter,
-                width: 48,
-                labelOf: (d) => '$d',
-                onChanged: (d) => setState(() => _setRimDiameter(c, d)),
-              ),
-              const DialSep('ET'),
-              InlineDial<int>(
-                values: _etValues,
-                value: c.et,
-                width: 56,
-                labelOf: (e) => '$e',
-                onChanged: (e) => setState(() => c.et = e),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          DialStrip(
-            label: 'Center bore / CB',
-            manualHint: 'e.g. 57.1',
-            dialText: () =>
-                c.centerBore == null ? '' : _fmtCb(c.centerBore!),
-            onResetToDefaults: () => setState(c.resetCbDefaults),
-            onManualChanged: (v) => setState(() => c.cbManual = v),
-            onDuplicate: _dup(i, () {
-              setState(() {
-                c.centerBore = prev!.centerBore;
                 c.cbManual = prev.cbManual;
+                c.diameterSet = prev.diameterSet;
               });
             }),
-            children: [
-              InlineDial<double?>(
-                values: _cbValues,
-                value: c.centerBore,
-                width: 88,
-                labelOf: (v) => v == null ? '—' : _fmtCb(v),
-                onChanged: (v) => setState(() => c.centerBore = v),
-              ),
-            ],
           ),
           const SizedBox(height: 12),
         ] else ...[
-          DialStrip(
-            label: 'ET',
-            manualHint: 'e.g. 35',
-            dialText: () => '${c.et}',
+          EtSelector(
+            et: c.et,
+            onChanged: (e) => setState(() => c.et = e),
             onResetToDefaults: () => setState(() {
               c.et = 35;
               c.sizeEtManual = null;
             }),
             onManualChanged: (v) => setState(() => c.sizeEtManual = v),
             onDuplicate: _dup(i, () => setState(() => c.et = prev!.et)),
-            children: [
-              const DialSep('ET'),
-              InlineDial<int>(
-                values: _etValues,
-                value: c.et,
-                width: 72,
-                labelOf: (e) => '$e',
-                onChanged: (e) => setState(() => c.et = e),
-              ),
-            ],
           ),
         ],
       ],
@@ -668,10 +579,19 @@ class _SpecsScreenState extends State<SpecsScreen> {
           }),
         ),
         const SizedBox(height: 12),
-        DialStrip(
-          label: 'Tire size',
-          manualHint: 'e.g. T125/90 R16 or 205/55 R16',
-          dialText: () => c.sizeLabel,
+        TireSizeSelector(
+          prefix: c.prefix,
+          width: c.width,
+          aspect: c.aspect,
+          construction: c.construction,
+          diameter: c.diameter,
+          suffix: c.suffix,
+          onPrefixChanged: (p) => setState(() => c.prefix = p),
+          onWidthChanged: (w) => setState(() => _onTireWidth(c, w)),
+          onAspectChanged: (a) => setState(() => _onTireAspect(c, a)),
+          onConstructionChanged: (k) => setState(() => c.construction = k),
+          onDiameterChanged: (d) => setState(() => _setTireDiameter(c, d)),
+          onSuffixChanged: (s) => setState(() => c.suffix = s),
           onResetToDefaults: () => setState(c.resetSizeDefaults),
           onManualChanged: (v) => setState(() => c.sizeManual = v),
           onDuplicate: _dup(i, () {
@@ -681,47 +601,11 @@ class _SpecsScreenState extends State<SpecsScreen> {
               c.aspect = prev.aspect;
               c.construction = prev.construction;
               c.diameter = prev.diameter;
+              c.suffix = prev.suffix;
               c.sizeManual = prev.sizeManual;
+              c.diameterSet = prev.diameterSet;
             });
           }),
-          children: [
-            InlineDial<String>(
-              values: _tirePrefixes,
-              value: c.prefix,
-              width: 36,
-              labelOf: (p) => p.isEmpty ? '–' : p,
-              onChanged: (p) => setState(() => c.prefix = p),
-            ),
-            InlineDial<int>(
-              values: _tireWidths,
-              value: c.width,
-              width: 56,
-              labelOf: (w) => '$w',
-              onChanged: (w) => setState(() => _onTireWidth(c, w)),
-            ),
-            const DialSep('/'),
-            InlineDial<int>(
-              values: _tireAspects,
-              value: c.aspect,
-              width: 48,
-              labelOf: (a) => '$a',
-              onChanged: (a) => setState(() => _onTireAspect(c, a)),
-            ),
-            InlineDial<String>(
-              values: _tireConstructions,
-              value: c.construction,
-              width: 48,
-              labelOf: (k) => k,
-              onChanged: (k) => setState(() => c.construction = k),
-            ),
-            InlineDial<int>(
-              values: _tireDiameters,
-              value: c.diameter,
-              width: 48,
-              labelOf: (d) => '$d',
-              onChanged: (d) => setState(() => _setTireDiameter(c, d)),
-            ),
-          ],
         ),
         const SizedBox(height: 12),
         DialStrip(
@@ -843,16 +727,7 @@ class _SpecsScreenState extends State<SpecsScreen> {
     );
   }
 
-  static String _fmtCb(double v) =>
-      v == v.roundToDouble() ? v.toInt().toString() : v.toStringAsFixed(1);
-
   static String _fmtTread(double v) => v.toStringAsFixed(1);
-
-  static String _fmtPcdMm(double d) => d == d.roundToDouble()
-      ? d.toInt().toString()
-      : ((d * 100).round() % 10 == 0
-          ? d.toStringAsFixed(1)
-          : d.toStringAsFixed(2));
 }
 
 class _RimControllers {
@@ -868,9 +743,7 @@ class _RimControllers {
   String? sizeEtManual;
   String? cbManual;
 
-  String get sizeLabel => width == width.roundToDouble()
-      ? '${width.toInt()}Jx$diameter'
-      : '${width}Jx$diameter';
+  String get sizeLabel => formatRimSize(width, diameter);
 
   void resetPcdDefaults() {
     pcdBolts = 5;
@@ -884,13 +757,10 @@ class _RimControllers {
     width = 7.5;
     diameter = 18;
     et = 35;
-    sizeEtManual = null;
-    diameterSet = false;
-  }
-
-  void resetCbDefaults() {
     centerBore = 57.1;
+    sizeEtManual = null;
     cbManual = null;
+    diameterSet = false;
   }
 
   RimSpecs toSpecs() {
@@ -901,10 +771,17 @@ class _RimControllers {
 
     var size = sizeLabel;
     var etStr = 'ET$et';
-    final sizeMan = sizeEtManual?.trim();
+    var sizeMan = sizeEtManual?.trim();
+    String? cbFromLine;
     if (sizeMan != null && sizeMan.isNotEmpty) {
-      final etMatch = RegExp(r'ET\s*(-?\d+)', caseSensitive: false)
-          .firstMatch(sizeMan);
+      final cbMatch =
+          RegExp(r'CB\s*([\d.,]+)', caseSensitive: false).firstMatch(sizeMan);
+      if (cbMatch != null) {
+        cbFromLine = cbMatch.group(1)!.replaceAll(',', '.');
+        sizeMan = sizeMan.replaceFirst(cbMatch.group(0)!, '').trim();
+      }
+      final etMatch =
+          RegExp(r'ET\s*(-?\d+)', caseSensitive: false).firstMatch(sizeMan);
       if (etMatch != null) {
         etStr = 'ET${etMatch.group(1)}';
         size = sizeMan.replaceFirst(etMatch.group(0)!, '').trim();
@@ -918,12 +795,14 @@ class _RimControllers {
 
     var cb = '';
     final cbMan = cbManual?.trim();
-    if (cbMan != null && cbMan.isNotEmpty) {
+    if (cbFromLine != null && cbFromLine.isNotEmpty) {
+      cb = cbFromLine;
+    } else if (cbMan != null && cbMan.isNotEmpty) {
       cb = cbMan;
+    } else if (sizeMan != null && sizeMan.isNotEmpty) {
+      cb = '';
     } else if (centerBore != null) {
-      cb = centerBore == centerBore!.roundToDouble()
-          ? centerBore!.toInt().toString()
-          : centerBore!.toStringAsFixed(1);
+      cb = formatCb(centerBore!);
     }
 
     return RimSpecs(
@@ -948,6 +827,7 @@ class _TireControllers {
   int aspect = 40;
   String construction = 'R';
   int diameter = 18;
+  String suffix = '';
   int dotWeek = 1;
   int dotYear = 23;
   double treadMm = 3.0;
@@ -959,7 +839,14 @@ class _TireControllers {
   String? dotManual;
   String? treadManual;
 
-  String get sizeLabel => '$prefix$width/$aspect $construction$diameter';
+  String get sizeLabel => formatTireSize(
+        prefix: prefix,
+        width: width,
+        aspect: aspect,
+        construction: construction,
+        diameter: diameter,
+        suffix: suffix,
+      );
 
   String get dotLabel =>
       '${dotWeek.toString().padLeft(2, '0')}${dotYear.toString().padLeft(2, '0')}';
@@ -972,6 +859,7 @@ class _TireControllers {
     aspect = 40;
     construction = 'R';
     diameter = 18;
+    suffix = '';
     sizeManual = null;
     diameterSet = false;
   }

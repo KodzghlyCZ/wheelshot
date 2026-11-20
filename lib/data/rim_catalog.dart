@@ -56,6 +56,14 @@ const List<double> kPcdDiameters = [
   170.0,
 ];
 
+final List<double> kRimWidths = [
+  for (var w = 4.0; w <= 12.0 + 0.01; w += 0.5) (w * 10).round() / 10,
+];
+
+final List<int> kRimDiameters = [for (var d = 13; d <= 23; d++) d];
+
+final List<int> kEtValues = [for (var e = -25; e <= 70; e++) e];
+
 String formatPcd(int bolts, double diameter) {
   final cleaned = diameter == diameter.roundToDouble()
       ? diameter.toInt().toString()

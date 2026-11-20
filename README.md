@@ -26,9 +26,9 @@ Point, shoot, fill specs. Sessions land as folders with ordered photos + JSON/te
 
 ### Download APK
 
-Every push to `main` builds a release APK and publishes it under [Releases](https://github.com/KodzghlyCZ/wheelshot/releases).
+Every push to `main` publishes a release APK. [Releases](https://github.com/KodzghlyCZ/wheelshot/releases/latest) opens that release with **wheelshot.apk** ready to download.
 
-1. Open the latest **build-*** release (or a `v*` version tag)
+1. Open [the latest release](https://github.com/KodzghlyCZ/wheelshot/releases/latest)
 2. Download `wheelshot.apk`
 3. Install on Android (allow unknown sources if prompted)
 
@@ -66,7 +66,9 @@ Needs USB debugging on a physical phone (Camera2). Emulators work poorly for thi
 
 ## Camera
 
-`ResolutionPreset.max`, focus lock on shutter, torch for DOT/stamp close-ups. Android Camera2 via `camera` + `camera_android`.
+Stills use the full sensor field of view (4:3 on a Pixel), the same frame as the system camera's photo mode. Focus locks on the shutter. Torch comes on for DOT/stamp close-ups.
+
+Android Camera2 via `camera` + a vendored `camera_android` (`third_party/camera_android`). Upstream `ResolutionPreset.max` picks a CamcorderProfile video size, which on Pixel is a 16:9 center crop and looks zoomed in. The vendored plugin keeps that video profile for recording and, for stills, chooses the largest JPEG and preview sizes whose aspect matches the sensor.
 
 ## CI
 
@@ -75,13 +77,13 @@ Needs USB debugging on a physical phone (Camera2). Emulators work poorly for thi
 1. Flutter `3.47.5` + JDK 17  
 2. `flutter build apk --release`  
 3. Upload `wheelshot.apk` artifact  
-4. Create a GitHub Release with the APK attached  
+4. Publish a GitHub Release marked latest, with `wheelshot.apk` linked at the top  
 
-Tag a version for a non-prerelease release:
+Tag a version when you want a named release (`v1.2.0`) instead of `build-*`:
 
 ```bash
-git tag v1.1.0
-git push origin v1.1.0
+git tag v1.1.1
+git push origin v1.1.1
 ```
 
 ## Project layout

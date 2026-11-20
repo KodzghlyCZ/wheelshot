@@ -1,14 +1,11 @@
-import 'dart:io';
-
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
 
+import '../route_observer.dart';
 import '../models/shoot_plan.dart';
 import '../services/session_store.dart';
-import 'done_screen.dart';
+import '../widgets/past_shoot_strip.dart';
+import 'past_shoots_screen.dart';
 import 'setup_screen.dart';
-import 'specs_screen.dart';
-import 'wizard_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -17,7 +14,7 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+class _HomeScreenState extends State<HomeScreen> with RouteAware {
   late Future<List<PastSession>> _past;
 
   @override
@@ -26,48 +23,47 @@ class _HomeScreenState extends State<HomeScreen> {
     _past = SessionStore.listPastSessions();
   }
 
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final route = ModalRoute.of(context);
+    if (route != null) routeObserver.subscribe(this, route);
+  }
+
+  @override
+  void dispose() {
+    routeObserver.unsubscribe(this);
+    super.dispose();
+  }
+
+  /// Setup is replaced by the wizard, so the push from home completes
+  /// before the shoot is finished. Reload when this route is shown again.
+  @override
+  void didPopNext() {
+    _reload();
+  }
+
   Future<void> _reload() async {
-    setState(() => _past = SessionStore.listPastSessions());
-    await _past;
+    final next = SessionStore.listPastSessions();
+    setState(() {
+      _past = next;
+    });
+    await next;
   }
 
-  Future<void> _openPast(PastSession s) async {
-    final store = await SessionStore.openExisting(s.name);
-    if (store == null || !mounted) return;
-    await Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => DoneScreen(store: store)),
+  Future<void> _editMenu(PastSession s) async {
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      builder: (_) => PastEditSheet(session: s),
     );
+    if (action == null || !mounted) return;
+    await openPastAction(context, s, action);
     if (mounted) _reload();
   }
 
-  Future<void> _editPhotos(PastSession s) async {
-    final store = await SessionStore.openExisting(s.name);
-    if (store == null || !mounted) return;
-    final captures = await store.existingCaptures();
-    if (!mounted) return;
-    final steps = buildWizard(
-      category: store.category,
-      config: store.config ?? const ShootConfig(),
-      spareHasRim: store.spareHasRim,
-      etNotes: store.dezentNotes,
-    );
+  Future<void> _showAll() async {
     await Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => WizardScreen(
-          store: store,
-          steps: steps,
-          initialCaptures: captures,
-        ),
-      ),
-    );
-    if (mounted) _reload();
-  }
-
-  Future<void> _editSpecs(PastSession s) async {
-    final store = await SessionStore.openExisting(s.name);
-    if (store == null || !mounted) return;
-    await Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => SpecsScreen(store: store)),
+      MaterialPageRoute(builder: (_) => const PastShootsScreen()),
     );
     if (mounted) _reload();
   }
@@ -79,6 +75,7 @@ class _HomeScreenState extends State<HomeScreen> {
         child: RefreshIndicator(
           onRefresh: _reload,
           child: ListView(
+            physics: const AlwaysScrollableScrollPhysics(),
             padding: const EdgeInsets.fromLTRB(20, 28, 20, 20),
             children: [
               Text(
@@ -121,6 +118,17 @@ class _HomeScreenState extends State<HomeScreen> {
               FutureBuilder<List<PastSession>>(
                 future: _past,
                 builder: (context, snap) {
+                  if (snap.hasError) {
+                    return Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      child: Text(
+                        'Could not read past shoots.\n${snap.error}',
+                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                              color: Colors.white54,
+                            ),
+                      ),
+                    );
+                  }
                   if (snap.connectionState != ConnectionState.done) {
                     return const Padding(
                       padding: EdgeInsets.symmetric(vertical: 24),
@@ -139,116 +147,12 @@ class _HomeScreenState extends State<HomeScreen> {
                       ),
                     );
                   }
-                  return Column(
-                    children: [
-                      for (final s in items) ...[
-                        _PastCard(
-                          session: s,
-                          onTap: () => _openPast(s),
-                          onPhotos: () => _editPhotos(s),
-                          onSpecs: () => _editSpecs(s),
-                        ),
-                        const SizedBox(height: 10),
-                      ],
-                    ],
+                  return PastShootStrip(
+                    sessions: items,
+                    onThumb: _editMenu,
+                    onShowAll: _showAll,
                   );
                 },
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _PastCard extends StatelessWidget {
-  const _PastCard({
-    required this.session,
-    required this.onTap,
-    required this.onPhotos,
-    required this.onSpecs,
-  });
-
-  final PastSession session;
-  final VoidCallback onTap;
-  final VoidCallback onPhotos;
-  final VoidCallback onSpecs;
-
-  @override
-  Widget build(BuildContext context) {
-    final when = session.modified == null
-        ? null
-        : DateFormat('d.M.yyyy HH:mm').format(session.modified!.toLocal());
-    final subtitle = [
-      if (session.title != null && session.title!.isNotEmpty) session.title!,
-      '${session.photoCount} photo${session.photoCount == 1 ? '' : 's'}',
-      if (when != null) when,
-    ].join(' · ');
-
-    return Material(
-      color: const Color(0xFF1C1F28),
-      borderRadius: BorderRadius.circular(16),
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(16),
-        child: Padding(
-          padding: const EdgeInsets.all(12),
-          child: Row(
-            children: [
-              ClipRRect(
-                borderRadius: BorderRadius.circular(10),
-                child: SizedBox(
-                  width: 56,
-                  height: 56,
-                  child: session.thumbPath == null
-                      ? ColoredBox(
-                          color: Colors.white10,
-                          child: Icon(
-                            Icons.photo_library_outlined,
-                            color: Theme.of(context).colorScheme.primary,
-                          ),
-                        )
-                      : Image.file(
-                          File(session.thumbPath!),
-                          fit: BoxFit.cover,
-                        ),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      session.name,
-                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                            fontWeight: FontWeight.w700,
-                          ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      subtitle,
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: Colors.white60,
-                          ),
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ],
-                ),
-              ),
-              IconButton(
-                tooltip: 'Photos',
-                onPressed: onPhotos,
-                icon: const Icon(Icons.photo_library),
-              ),
-              IconButton(
-                tooltip: 'Specs',
-                onPressed: onSpecs,
-                icon: const Icon(Icons.tune),
               ),
             ],
           ),
@@ -293,7 +197,8 @@ class _CategoryCard extends StatelessWidget {
                       .withValues(alpha: 0.18),
                   borderRadius: BorderRadius.circular(12),
                 ),
-                child: Icon(_icon, color: Theme.of(context).colorScheme.primary),
+                child:
+                    Icon(_icon, color: Theme.of(context).colorScheme.primary),
               ),
               const SizedBox(width: 14),
               Expanded(

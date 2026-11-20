@@ -77,6 +77,7 @@ class _CameraScreenState extends State<CameraScreen>
     final description = _cameras[index];
     final controller = CameraController(
       description,
+      // Full sensor still (4:3 on Pixel), not the plugin's 16:9 video crop.
       ResolutionPreset.max,
       enableAudio: false,
       imageFormatGroup: ImageFormatGroup.jpeg,
@@ -107,6 +108,10 @@ class _CameraScreenState extends State<CameraScreen>
       await controller.dispose();
       return;
     }
+    debugPrint(
+      'WheelShot preview ${controller.value.previewSize} '
+      'aspect ${controller.value.aspectRatio.toStringAsFixed(3)}',
+    );
     setState(() {
       _controller = controller;
       _cameraIndex = index;
@@ -236,7 +241,12 @@ class _CameraScreenState extends State<CameraScreen>
     if (_cameras.isEmpty) return '';
     final cam = _cameras[_cameraIndex];
     // Camera2 id is usually in [CameraDescription.name] (e.g. "0", "2", "3").
-    return 'Lens ${_cameraIndex + 1}/${_cameras.length} · ${cam.name}';
+    // Preview size is in sensor orientation: 1920×1440 is 4:3, 1280×720 is 16:9.
+    final preview = _controller?.value.previewSize;
+    final size = preview == null
+        ? ''
+        : ' · ${preview.width.toInt()}×${preview.height.toInt()}';
+    return 'Lens ${_cameraIndex + 1}/${_cameras.length} · ${cam.name}$size';
   }
 
   /// Quarter-turns (CW) so a bottom-aligned child lands on the gravity-bottom

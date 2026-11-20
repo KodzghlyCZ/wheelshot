@@ -57,12 +57,10 @@ jobs:
           if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
             echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
             echo "name=WheelShot ${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
-            echo "prerelease=false" >> "$GITHUB_OUTPUT"
           else
             short="${GITHUB_SHA::7}"
             echo "tag=build-${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
             echo "name=WheelShot build ${GITHUB_RUN_NUMBER} (${short})" >> "$GITHUB_OUTPUT"
-            echo "prerelease=true" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Publish GitHub Release
@@ -70,7 +68,15 @@ jobs:
         with:
           tag_name: ${{ steps.meta.outputs.tag }}
           name: ${{ steps.meta.outputs.name }}
-          prerelease: ${{ steps.meta.outputs.prerelease }}
-          generate_release_notes: true
+          # Stable, not a prerelease, so /releases/latest is this build
+          # and the repo Releases link opens on the APK.
+          prerelease: false
+          make_latest: true
+          body: |
+            ### Download
+
+            [wheelshot.apk](https://github.com/${{ github.repository }}/releases/download/${{ steps.meta.outputs.tag }}/wheelshot.apk)
+
+            Install on Android. Allow unknown sources if the phone asks.
           files: wheelshot.apk
           fail_on_unmatched_files: true

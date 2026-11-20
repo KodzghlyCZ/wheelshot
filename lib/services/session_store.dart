@@ -32,7 +32,16 @@ class SessionStore {
 
   Directory get sessionDir => Directory(p.join(rootDir.path, sessionName));
 
-  static Future<Directory> documentsRoot() async {
+  static Future<Directory>? _documentsRoot;
+
+  /// One in-flight lookup. Home reloads twice when a route pops
+  /// (didPopNext and the push future), and a second probe of
+  /// Documents/WheelShot/.write_test deletes the file out from under
+  /// the first and falls back to an empty app folder.
+  static Future<Directory> documentsRoot() =>
+      _documentsRoot ??= _resolveDocumentsRoot();
+
+  static Future<Directory> _resolveDocumentsRoot() async {
     if (Platform.isAndroid) {
       final ext = await getExternalStorageDirectory();
       final publicDocs = Directory('/storage/emulated/0/Documents/WheelShot');

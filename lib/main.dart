@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import 'route_observer.dart';
 import 'screens/splash_screen.dart';
 
 void main() {
@@ -21,6 +22,7 @@ class WheelShotApp extends StatelessWidget {
     return MaterialApp(
       title: 'WheelShot',
       debugShowCheckedModeBanner: false,
+      navigatorObservers: [routeObserver],
       theme: ThemeData(
         useMaterial3: true,
         brightness: Brightness.dark,

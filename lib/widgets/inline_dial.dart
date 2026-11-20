@@ -1,5 +1,6 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 
 /// Compact [CupertinoPicker] that wins vertical gestures over a parent [ListView].
 class InlineDial<T> extends StatefulWidget {
@@ -43,15 +44,45 @@ class _InlineDialState<T> extends State<InlineDial<T>> {
   void didUpdateWidget(covariant InlineDial<T> oldWidget) {
     super.didUpdateWidget(oldWidget);
     final next = _indexOf(widget.value);
-    if (_controller.hasClients && _controller.selectedItem != next) {
-      _controller.jumpToItem(next);
-    }
+    if (_controller.hasClients && _controller.selectedItem == next) return;
+    // jumpToItem notifies the picker immediately. From didUpdateWidget that
+    // runs while the parent is still building (rim Ø sync moves the tire
+    // dial) and onSelectedItemChanged would setState during that build.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_controller.hasClients) return;
+      final latest = _indexOf(widget.value);
+      if (_controller.selectedItem != latest) {
+        _controller.jumpToItem(latest);
+      }
+    });
   }
 
   @override
   void dispose() {
     _controller.dispose();
     super.dispose();
+  }
+
+  void _onSelected(int index) {
+    final phase = SchedulerBinding.instance.schedulerPhase;
+    if (phase == SchedulerPhase.persistentCallbacks ||
+        phase == SchedulerPhase.midFrameMicrotasks) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || !_controller.hasClients) return;
+        _emit(_controller.selectedItem);
+      });
+      return;
+    }
+    _emit(index);
+  }
+
+  void _emit(int index) {
+    if (index < 0 || index >= widget.values.length) return;
+    final next = widget.values[index];
+    // A programmatic jump lands on the value the parent already stored.
+    // Reporting it again would mark a synced diameter as a user edit.
+    if (next == widget.value) return;
+    widget.onChanged(next);
   }
 
   @override
@@ -81,10 +112,12 @@ class _InlineDialState<T> extends State<InlineDial<T>> {
             capStartEdge: false,
             capEndEdge: false,
           ),
-          onSelectedItemChanged: (i) {
-            if (i < 0 || i >= widget.values.length) return;
-            widget.onChanged(widget.values[i]);
-          },
+          // Scroll updates also fire while the wheel lays out. SpecsScreen
+          // rebuilds every dial on each tick (and on Save). A callback then
+          // setStates the screen during that layout and the whole page goes red.
+          // Commit only when the wheel stops, and never from inside a frame.
+          changeReportingBehavior: ChangeReportingBehavior.onScrollEnd,
+          onSelectedItemChanged: _onSelected,
           children: [
             for (final v in widget.values)
               Center(

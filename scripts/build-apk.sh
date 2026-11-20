@@ -8,6 +8,11 @@ cd "$ROOT"
 export JAVA_HOME="${JAVA_HOME:-$HOME/jdks/jdk-17}"
 export ANDROID_HOME="${ANDROID_HOME:-$HOME/Android/Sdk}"
 export ANDROID_SDK_ROOT="$ANDROID_HOME"
+# Cursor's sandbox points Gradle at an empty /tmp cache, so every build
+# re-downloads the wrapper and the Flutter engine jars. Always use the
+# real cache under the home directory.
+export GRADLE_USER_HOME="${GRADLE_USER_HOME_REAL:-$HOME/.gradle}"
+export PUB_CACHE="${PUB_CACHE:-$HOME/.pub-cache}"
 export PATH="$HOME/flutter/bin:$JAVA_HOME/bin:$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$PATH"
 export FLUTTER_SUPPRESS_ANALYTICS=true
 
@@ -34,7 +39,7 @@ EOF
 
 flutter config --jdk-dir="$JAVA_HOME" --no-analytics >/dev/null
 flutter pub get
-flutter build apk --debug --android-skip-build-dependency-validation
+flutter build apk --debug -v --android-skip-build-dependency-validation
 
 APK="$ROOT/build/app/outputs/flutter-apk/app-debug.apk"
 echo
