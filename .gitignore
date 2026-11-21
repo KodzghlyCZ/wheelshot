@@ -24,6 +24,7 @@ __pycache__/
 
 # Local-only helpers (poster, flipscout, demos) — stay on disk, never publish
 tools/
+tool_data/
 demo/
 
 # debug / scratch screenshots

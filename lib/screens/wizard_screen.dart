@@ -12,8 +12,10 @@ import '../models/shoot_plan.dart';
 import '../models/spec_draft.dart';
 import '../services/session_store.dart';
 import '../vision/bolt_pattern.dart';
+import '../vision/dot_ocr.dart';
 import '../widgets/bolt_pattern_overlay.dart';
 import '../widgets/confirm_leave.dart';
+import '../widgets/dot_aim_overlay.dart';
 import '../widgets/shoot_dials.dart';
 import 'specs_screen.dart';
 
@@ -63,7 +65,10 @@ class _WizardScreenState extends State<WizardScreen>
   String? _cameraError;
   BoltPattern? _pattern;
   final _hold = BoltPatternHold();
-  var _patternBusy = false;
+  final _dotOcr = DotOcr();
+  final _dotHold = DotDateHold();
+  DotDate? _dotDate;
+  var _streamBusy = false;
   var _torchOn = false;
 
   ShotStep get _step => _steps[_index];
@@ -115,6 +120,7 @@ class _WizardScreenState extends State<WizardScreen>
     _focusHide?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     _controller?.dispose();
+    _dotOcr.dispose();
     SystemChrome.setPreferredOrientations(const [
       DeviceOrientation.portraitUp,
     ]);
@@ -125,7 +131,7 @@ class _WizardScreenState extends State<WizardScreen>
   void didChangeAppLifecycleState(AppLifecycleState state) {
     final controller = _controller;
     if (state == AppLifecycleState.inactive) {
-      _patternBusy = false;
+      _streamBusy = false;
       controller?.dispose();
       _controller = null;
       if (mounted) setState(() {});
@@ -178,13 +184,16 @@ class _WizardScreenState extends State<WizardScreen>
   Future<void> _syncCamera() async {
     final c = _controller;
     if (c == null || !c.value.isInitialized) return;
-    final hub = _step.dials == ShotDials.hub;
+    final needStream =
+        _step.dials == ShotDials.hub || _step.dials == ShotDials.dot;
     try {
-      if (hub && !c.value.isStreamingImages) {
-        await c.startImageStream(_onHubFrame);
-      } else if (!hub && c.value.isStreamingImages) {
+      if (needStream && !c.value.isStreamingImages) {
+        await c.startImageStream(_onStreamFrame);
+      } else if (!needStream && c.value.isStreamingImages) {
         await c.stopImageStream();
         _pattern = null;
+        _dotDate = null;
+        _dotHold.push(null);
       }
     } catch (_) {}
     try {
@@ -201,11 +210,20 @@ class _WizardScreenState extends State<WizardScreen>
     if (mounted) setState(() {});
   }
 
+  void _onStreamFrame(CameraImage image) {
+    if (_streamBusy) return;
+    if (_step.dials == ShotDials.hub) {
+      _onHubFrame(image);
+    } else if (_step.dials == ShotDials.dot) {
+      _onDotFrame(image);
+    }
+  }
+
   void _onHubFrame(CameraImage image) {
-    if (_step.dials != ShotDials.hub || _patternBusy) return;
+    if (_step.dials != ShotDials.hub) return;
     final controller = _controller;
     if (controller == null) return;
-    _patternBusy = true;
+    _streamBusy = true;
     analyzeCameraFrame(image, controller.description.sensorOrientation)
         .then((pattern) {
       if (!mounted || _step.dials != ShotDials.hub) return;
@@ -224,7 +242,38 @@ class _WizardScreenState extends State<WizardScreen>
         if (writeBolts) rim.pcdBolts = count;
       });
     }).whenComplete(() {
-      _patternBusy = false;
+      _streamBusy = false;
+    });
+  }
+
+  void _onDotFrame(CameraImage image) {
+    if (_step.dials != ShotDials.dot || _hasPhoto) return;
+    final controller = _controller;
+    if (controller == null) return;
+    _streamBusy = true;
+    _dotOcr
+        .analyze(
+      image,
+      sensorOrientation: controller.description.sensorOrientation,
+      deviceOrientation: _captureOrientation(_sensor),
+    )
+        .then((found) {
+      if (!mounted || _step.dials != ShotDials.dot) return;
+      final shown = _dotHold.push(found);
+      var wrote = false;
+      if (shown != null) {
+        for (final t in _draft.tires) {
+          if (t.dotWeek != shown.week || t.dotYear != shown.year) {
+            t.dotWeek = shown.week;
+            t.dotYear = shown.year;
+            wrote = true;
+          }
+        }
+      }
+      if (identical(shown, _dotDate) && !wrote) return;
+      setState(() => _dotDate = shown);
+    }).whenComplete(() {
+      _streamBusy = false;
     });
   }
 
@@ -508,6 +557,7 @@ class _WizardScreenState extends State<WizardScreen>
           w = h * widthOverHeight;
         }
         final hub = _step.dials == ShotDials.hub && photo == null;
+        final dot = _step.dials == ShotDials.dot && photo == null;
         Widget child;
         if (photo != null) {
           child = _ShotPhoto(
@@ -530,6 +580,8 @@ class _WizardScreenState extends State<WizardScreen>
                 CameraPreview(c),
                 if (hub)
                   CustomPaint(painter: BoltPatternOverlayPainter(_pattern)),
+                if (dot)
+                  CustomPaint(painter: DotAimOverlayPainter(_dotDate)),
                 if (_focusUi != null)
                   Positioned(
                     left: _focusUi!.dx - 36,
