@@ -117,7 +117,7 @@ class ShootConfig {
       );
 }
 
-enum ShotDials { none, tireSize, tread, dot, hub, rimSize, et }
+enum ShotDials { none, tireSize, tread, dot, hub, brand, rimSize, et }
 
 class ShotStep {
   const ShotStep({
@@ -295,9 +295,11 @@ List<ShotStep> _rimFaceShots({
       ShotStep(
         id: '${filePrefix}_rim_brand',
         title: '${prefix}brand stamp',
-        hint: 'Maker stamp, filling the frame.',
+        hint: 'Maker stamp, filling the frame. Pick the car maker.',
         preferTorch: true,
         guide: ShotGuide.rimStamp,
+        dials: ShotDials.brand,
+        specIndex: index,
       ),
       ShotStep(
         id: '${filePrefix}_rim_size',

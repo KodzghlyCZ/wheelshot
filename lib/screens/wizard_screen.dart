@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:ui' as ui;
 
@@ -45,6 +46,9 @@ class _WizardScreenState extends State<WizardScreen>
   int _index = 0;
   final Map<String, String> _captured = {};
   final Map<String, DeviceOrientation> _shotHold = {};
+  final Set<String> _keptWithoutPhoto = {};
+  Offset? _focusUi;
+  Timer? _focusHide;
   int _camSensor = 90;
   bool _camFront = false;
   final Set<String> _hubFrozen = {};
@@ -108,6 +112,7 @@ class _WizardScreenState extends State<WizardScreen>
 
   @override
   void dispose() {
+    _focusHide?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     _controller?.dispose();
     SystemChrome.setPreferredOrientations(const [
@@ -284,6 +289,7 @@ class _WizardScreenState extends State<WizardScreen>
       setState(() {
         _captured[_step.id] = saved.path;
         _shotHold[_step.id] = _captureOrientation(_sensor);
+        _keptWithoutPhoto.remove(_step.id);
         if (_step.dials == ShotDials.hub) _hubFrozen.add(_step.id);
       });
     } catch (e) {
@@ -297,7 +303,7 @@ class _WizardScreenState extends State<WizardScreen>
     }
   }
 
-  Future<void> _dropPhoto(String id) async {
+  Future<void> _deletePhotoFile(String id) async {
     final path = _captured[id];
     if (path == null) return;
     await FileImage(File(path)).evict();
@@ -306,12 +312,22 @@ class _WizardScreenState extends State<WizardScreen>
     } catch (_) {}
     _captured.remove(id);
     _shotHold.remove(id);
-    _hubFrozen.remove(id);
   }
 
   Future<void> _retry() async {
     final id = _step.id;
-    await _dropPhoto(id);
+    await _deletePhotoFile(id);
+    _hubFrozen.remove(id);
+    _keptWithoutPhoto.remove(id);
+    if (!mounted) return;
+    setState(() {});
+  }
+
+  /// Drop the file and keep the dials. Next can move on with no photo.
+  Future<void> _trash() async {
+    final id = _step.id;
+    await _deletePhotoFile(id);
+    _keptWithoutPhoto.add(id);
     if (!mounted) return;
     setState(() {});
   }
@@ -351,7 +367,9 @@ class _WizardScreenState extends State<WizardScreen>
       return;
     }
     _ensureSnap();
-    if (_hasPhoto) await _dropPhoto(_step.id);
+    _keptWithoutPhoto.remove(_step.id);
+    if (_hasPhoto) await _deletePhotoFile(_step.id);
+    _hubFrozen.remove(_step.id);
     discardStep(_draft, _step, restoreEt: _etAtStep);
     await _persist();
     if (!mounted) return;
@@ -361,6 +379,26 @@ class _WizardScreenState extends State<WizardScreen>
     }
     setState(() => _index++);
     await _syncCamera();
+  }
+
+  Future<void> _tapFocus(TapDownDetails details, Size size) async {
+    final c = _controller;
+    if (c == null || !c.value.isInitialized || _capturing || _hasPhoto) return;
+    if (size.width <= 0 || size.height <= 0) return;
+    final local = details.localPosition;
+    final xp = (local.dx / size.width).clamp(0.0, 1.0);
+    final yp = (local.dy / size.height).clamp(0.0, 1.0);
+    HapticFeedback.selectionClick();
+    setState(() => _focusUi = local);
+    _focusHide?.cancel();
+    _focusHide = Timer(const Duration(milliseconds: 1400), () {
+      if (mounted) setState(() => _focusUi = null);
+    });
+    try {
+      await c.setFocusMode(FocusMode.auto);
+      await c.setFocusPoint(Offset(xp, yp));
+      await c.setExposurePoint(Offset(xp, yp));
+    } catch (_) {}
   }
 
   Future<void> _toggleTorch() async {
@@ -483,39 +521,49 @@ class _WizardScreenState extends State<WizardScreen>
         } else if (c == null || !c.value.isInitialized) {
           child = const Center(child: CircularProgressIndicator());
         } else {
-          child = Stack(
-            fit: StackFit.expand,
-            children: [
-              CameraPreview(c),
-              if (hub)
-                CustomPaint(painter: BoltPatternOverlayPainter(_pattern)),
-              Positioned(
-                left: 4,
-                top: 4,
-                child: IconButton(
-                  tooltip: _torchOn ? 'Torch off' : 'Torch on',
-                  onPressed: _toggleTorch,
-                  icon: Icon(
-                    _torchOn ? Icons.flash_on : Icons.flash_off,
-                    color: Colors.white,
+          child = GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTapDown: (details) => _tapFocus(details, Size(w, h)),
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                CameraPreview(c),
+                if (hub)
+                  CustomPaint(painter: BoltPatternOverlayPainter(_pattern)),
+                if (_focusUi != null)
+                  Positioned(
+                    left: _focusUi!.dx - 36,
+                    top: _focusUi!.dy - 36,
+                    child: const IgnorePointer(child: _FocusReticle()),
+                  ),
+                Positioned(
+                  left: 4,
+                  top: 4,
+                  child: IconButton(
+                    tooltip: _torchOn ? 'Torch off' : 'Torch on',
+                    onPressed: _toggleTorch,
+                    icon: Icon(
+                      _torchOn ? Icons.flash_on : Icons.flash_off,
+                      color: Colors.white,
+                    ),
                   ),
                 ),
-              ),
-              Positioned(
-                left: 12,
-                right: 12,
-                bottom: 8,
-                child: Text(
-                  _step.hint,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    shadows: [Shadow(blurRadius: 6)],
+                Positioned(
+                  left: 12,
+                  right: 12,
+                  bottom: 8,
+                  child: Text(
+                    _step.hint,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      shadows: [Shadow(blurRadius: 6)],
+                    ),
                   ),
                 ),
-              ),
-            ],
+              ],
+            ),
           );
         }
         return Align(
@@ -528,23 +576,27 @@ class _WizardScreenState extends State<WizardScreen>
 
   Widget _actions(int turns) {
     final busy = _capturing;
-    final items = !_hasPhoto
+    final keepValues = _keptWithoutPhoto.contains(_step.id);
+    final items = _hasPhoto
         ? [
+            _Act('Next', Icons.arrow_forward, busy ? null : _next, filled: true),
+            _Act('Retry', Icons.refresh, busy ? null : _retry),
+            _Act(
+              _inExtras ? 'Done' : 'Skip',
+              _inExtras ? Icons.check : Icons.skip_next,
+              busy ? null : _skip,
+            ),
+            _Act('Trash', Icons.delete_outline, busy ? null : _trash),
+          ]
+        : [
             _Act(
               'Take a photo',
               Icons.photo_camera,
               busy ? null : _take,
               filled: true,
             ),
-            _Act(
-              _inExtras ? 'Done' : 'Skip',
-              _inExtras ? Icons.check : Icons.skip_next,
-              busy ? null : _skip,
-            ),
-          ]
-        : [
-            _Act('Next', Icons.arrow_forward, busy ? null : _next, filled: true),
-            _Act('Retry', Icons.refresh, busy ? null : _retry),
+            if (keepValues)
+              _Act('Next', Icons.arrow_forward, busy ? null : _next, filled: true),
             _Act(
               _inExtras ? 'Done' : 'Skip',
               _inExtras ? Icons.check : Icons.skip_next,
@@ -569,7 +621,8 @@ class _WizardScreenState extends State<WizardScreen>
           final slotW =
               (constraints.maxWidth - 8 * (items.length - 1)) / items.length;
           final rotated = turns != 0;
-          final textFits = !rotated || (longest + 36) <= 168;
+          final textFits =
+              longest + 40 <= slotW && (!rotated || (longest + 36) <= 168);
           final barH = !rotated
               ? null
               : textFits
@@ -588,11 +641,13 @@ class _WizardScreenState extends State<WizardScreen>
                     child: rotated
                         ? RotatedBox(
                             quarterTurns: turns,
-                            child: textFits && slotW >= 48
+                            child: textFits
                                 ? _textButton(items[i])
                                 : _iconButton(items[i]),
                           )
-                        : _textButton(items[i]),
+                        : textFits
+                            ? _textButton(items[i])
+                            : _iconButton(items[i]),
                   ),
                 ],
               ],
@@ -777,4 +832,50 @@ int _photoQuarterTurns(DeviceOrientation device, int sensor, bool front) {
     DeviceOrientation.landscapeRight => front ? 0 : 180,
   };
   return ((angle + sensor + 270) % 360) ~/ 90;
+}
+
+class _FocusReticle extends StatelessWidget {
+  const _FocusReticle();
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 72,
+      height: 72,
+      child: CustomPaint(painter: _FocusReticlePainter()),
+    );
+  }
+}
+
+class _FocusReticlePainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final stroke = Paint()
+      ..color = const Color(0xFFFFC107)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2;
+    const inset = 4.0;
+    canvas.drawRect(
+      Rect.fromLTWH(inset, inset, size.width - inset * 2, size.height - inset * 2),
+      stroke,
+    );
+    const tick = 10.0;
+    final midX = size.width / 2;
+    final midY = size.height / 2;
+    canvas.drawLine(Offset(midX, inset), Offset(midX, inset + tick), stroke);
+    canvas.drawLine(
+      Offset(midX, size.height - inset),
+      Offset(midX, size.height - inset - tick),
+      stroke,
+    );
+    canvas.drawLine(Offset(inset, midY), Offset(inset + tick, midY), stroke);
+    canvas.drawLine(
+      Offset(size.width - inset, midY),
+      Offset(size.width - inset - tick, midY),
+      stroke,
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }

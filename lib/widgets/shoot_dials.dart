@@ -5,6 +5,7 @@ import '../models/shoot_plan.dart';
 import '../models/spec_draft.dart';
 import 'inline_dial.dart';
 import 'rim_spec_selectors.dart';
+import 'suggest_field.dart';
 import 'tire_size_selector.dart';
 
 /// Spec dials for the current shot. Two or more selectors stay clipped
@@ -67,7 +68,10 @@ class _ShootDialAreaState extends State<ShootDialArea> {
               child: SingleChildScrollView(
                 controller: _scroll,
                 physics: const NeverScrollableScrollPhysics(),
-                child: widget.child,
+                child: Padding(
+                  padding: EdgeInsets.only(right: showArrow ? 44 : 0),
+                  child: widget.child,
+                ),
               ),
             ),
           ),
@@ -108,10 +112,24 @@ class ShootDialBody extends StatelessWidget {
       ShotDials.tread => _tread(),
       ShotDials.dot => _tires(size: false),
       ShotDials.hub => _hub(),
+      ShotDials.brand => _brand(),
       ShotDials.rimSize => _rimSize(),
       ShotDials.et => _et(),
       ShotDials.none => const SizedBox.shrink(),
     };
+  }
+
+  Widget _brand() {
+    final r = _rim;
+    if (r == null) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 4, 12, 4),
+      child: _BrandField(
+        key: ValueKey('brand-${step.id}-${step.specIndex}'),
+        value: r.brand,
+        onChanged: (v) => _set(() => r.brand = v),
+      ),
+    );
   }
 
   Widget _tires({required bool size}) {
@@ -166,54 +184,44 @@ class ShootDialBody extends StatelessWidget {
   Widget _tread() {
     return Column(
       children: [
-        for (var i = 0; i < draft.tires.length; i++)
-          for (var d = 0; d < draft.tires[i].treadDepths.length; d++)
-            _treadDial(i, d),
-        Align(
-          alignment: Alignment.centerLeft,
-          child: IconButton(
-            tooltip: 'Add tread depth',
-            onPressed: draft.tires.isEmpty
-                ? null
-                : () => _set(() {
-                      final last = draft.tires.last;
-                      final seed = last.treadDepths.isEmpty
-                          ? 3.0
-                          : last.treadDepths.last;
-                      last.treadDepths.add(seed);
-                    }),
-            icon: const Icon(Icons.add),
-          ),
-        ),
+        for (var i = 0; i < draft.tires.length; i++) _treadRow(i),
       ],
     );
   }
 
-  Widget _treadDial(int i, int d) {
+  Widget _treadRow(int i) {
     final t = draft.tires[i];
-    final depth = t.treadDepths[d];
-    final multi = draft.tires.length > 1 || t.treadDepths.length > 1;
-    final label = multi
-        ? 'Tread ${draft.tires.length > 1 ? 'type ${i + 1} · ' : ''}${d + 1}'
-        : 'Tread depth (mm)';
+    final label =
+        draft.tires.length > 1 ? 'Tread · type ${i + 1}' : 'Tread depth (mm)';
     return DialStrip(
       label: label,
-      manualHint: 'e.g. 4.5',
-      dialText: () => depth.toStringAsFixed(1),
-      onResetToDefaults: () => _set(() => t.treadDepths[d] = 3.0),
+      manualHint: 'e.g. 6.0, 4.5',
+      dialText: () => t.treadDepths.map((v) => v.toStringAsFixed(1)).join(', '),
+      onResetToDefaults: () => _set(() => t.treadDepths = [3.0]),
       onManualChanged: (v) {
         if (v == null) return;
-        final n = double.tryParse(v.replaceAll(',', '.'));
-        if (n != null) _set(() => t.treadDepths[d] = n);
+        final nums = _parseDepths(v);
+        if (nums != null) _set(() => t.treadDepths = nums);
       },
       children: [
-        InlineDial<double>(
-          values: [for (var mm = 0; mm <= 40; mm++) mm / 2],
-          value: _nearestTread(depth),
-          width: 72,
-          labelOf: (v) => v.toStringAsFixed(1),
-          onChanged: (v) => _set(() => t.treadDepths[d] = v),
-          reportLive: true,
+        for (var d = 0; d < t.treadDepths.length; d++) ...[
+          if (d > 0) const DialGap(),
+          InlineDial<double>(
+            values: [for (var mm = 0; mm <= 40; mm++) mm / 2],
+            value: _nearestTread(t.treadDepths[d]),
+            width: 64,
+            labelOf: (v) => v.toStringAsFixed(1),
+            onChanged: (v) => _set(() => t.treadDepths[d] = v),
+            reportLive: true,
+          ),
+        ],
+        IconButton(
+          tooltip: 'Add tread depth',
+          onPressed: () => _set(() {
+            final seed = t.treadDepths.isEmpty ? 3.0 : t.treadDepths.last;
+            t.treadDepths.add(seed);
+          }),
+          icon: const Icon(Icons.add),
         ),
       ],
     );
@@ -394,6 +402,70 @@ class ShootDialBody extends StatelessWidget {
     to.suffix = from.suffix;
     to.sizeManual = from.sizeManual;
   }
+}
+
+class _BrandField extends StatefulWidget {
+  const _BrandField({
+    super.key,
+    required this.value,
+    required this.onChanged,
+  });
+
+  final String value;
+  final ValueChanged<String> onChanged;
+
+  @override
+  State<_BrandField> createState() => _BrandFieldState();
+}
+
+class _BrandFieldState extends State<_BrandField> {
+  late final TextEditingController _ctrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = TextEditingController(text: widget.value);
+  }
+
+  @override
+  void didUpdateWidget(_BrandField oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.value != widget.value && _ctrl.text != widget.value) {
+      _ctrl.text = widget.value;
+    }
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SuggestField(
+      controller: _ctrl,
+      label: 'Car maker / rim brand',
+      hint: 'e.g. Volkswagen · OCR later',
+      options: kRimBrands,
+      onChanged: widget.onChanged,
+    );
+  }
+}
+
+List<double>? _parseDepths(String raw) {
+  final parts = raw
+      .split(RegExp(r'\s*[,;/|]\s*'))
+      .where((s) => s.trim().isNotEmpty)
+      .toList();
+  if (parts.isEmpty) return null;
+  final nums = <double>[];
+  for (final part in parts) {
+    final n = double.tryParse(part.trim().replaceAll(',', '.'));
+    if (n == null) return null;
+    nums.add(n);
+  }
+  return nums;
 }
 
 double _nearestTread(double v) {

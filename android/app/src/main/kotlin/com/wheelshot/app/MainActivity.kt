@@ -3,6 +3,7 @@ package com.wheelshot.app
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
+import android.os.PowerManager
 import android.provider.Settings
 import androidx.core.content.FileProvider
 import io.flutter.embedding.android.FlutterActivity
@@ -11,25 +12,55 @@ import io.flutter.plugin.common.MethodChannel
 import java.io.File
 
 class MainActivity : FlutterActivity() {
+    private var wakeLock: PowerManager.WakeLock? = null
+
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL)
             .setMethodCallHandler { call, result ->
-                if (call.method != "install") {
-                    result.notImplemented()
-                    return@setMethodCallHandler
-                }
-                val path = call.argument<String>("path")
-                if (path.isNullOrEmpty()) {
-                    result.error("bad-path", "missing apk path", null)
-                    return@setMethodCallHandler
-                }
-                try {
-                    result.success(installApk(path))
-                } catch (e: Exception) {
-                    result.error("install", e.message, null)
+                when (call.method) {
+                    "install" -> {
+                        val path = call.argument<String>("path")
+                        if (path.isNullOrEmpty()) {
+                            result.error("bad-path", "missing apk path", null)
+                            return@setMethodCallHandler
+                        }
+                        try {
+                            result.success(installApk(path))
+                        } catch (e: Exception) {
+                            result.error("install", e.message, null)
+                        }
+                    }
+                    "wakeLock" -> {
+                        holdWake(true)
+                        result.success(null)
+                    }
+                    "wakeUnlock" -> {
+                        holdWake(false)
+                        result.success(null)
+                    }
+                    else -> result.notImplemented()
                 }
             }
+    }
+
+    private fun holdWake(on: Boolean) {
+        if (on) {
+            if (wakeLock?.isHeld == true) return
+            val pm = getSystemService(POWER_SERVICE) as PowerManager
+            wakeLock = pm.newWakeLock(
+                PowerManager.PARTIAL_WAKE_LOCK,
+                "wheelshot:update",
+            ).also {
+                it.setReferenceCounted(false)
+                it.acquire(10 * 60 * 1000L)
+            }
+        } else {
+            wakeLock?.let {
+                if (it.isHeld) it.release()
+            }
+            wakeLock = null
+        }
     }
 
     private fun installApk(path: String): String {

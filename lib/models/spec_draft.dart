@@ -138,6 +138,7 @@ class TireDraft {
 }
 
 class RimDraft {
+  String brand = '';
   int pcdBolts = 5;
   double pcdDiameter = 112;
   double width = 7.5;
@@ -148,6 +149,7 @@ class RimDraft {
   String? sizeManual;
 
   /// Null keeps the value already in the session. Empty string drops it.
+  String? brandOut;
   String? pcdOut;
   String? cbOut;
   String? etOut;
@@ -157,6 +159,7 @@ class RimDraft {
       pcdManual != null && pcdManual!.trim().isNotEmpty;
 
   void apply(RimSpecs specs) {
+    if (specs.brand.trim().isNotEmpty) brand = specs.brand.trim();
     final pcd = RegExp(r'(\d+)\s*[x×]\s*([\d.]+)', caseSensitive: false)
         .firstMatch(specs.pcd);
     if (pcd != null) {
@@ -213,12 +216,14 @@ class RimDraft {
     etOut = 'ET$et';
   }
 
+  void keepBrand() => brandOut = brand.trim();
+
   void keepRimSize() => sizeOut = sizeLabel;
 
   void keepEt() => etOut = 'ET$et';
 
   RimSpecs toSpecs(RimSpecs prior) => RimSpecs(
-        brand: prior.brand,
+        brand: brandOut ?? prior.brand,
         pcd: pcdOut ?? prior.pcd,
         et: etOut ?? prior.et,
         size: sizeOut ?? prior.size,
@@ -244,6 +249,8 @@ void commitStep(SpecDraft draft, ShotStep step) {
     case ShotDials.hub:
       final rim = _rimAt(draft, step.specIndex);
       rim?.keepHub();
+    case ShotDials.brand:
+      _rimAt(draft, step.specIndex)?.keepBrand();
     case ShotDials.rimSize:
       _rimAt(draft, step.specIndex)?.keepRimSize();
     case ShotDials.et:
@@ -274,6 +281,8 @@ void discardStep(SpecDraft draft, ShotStep step, {String? restoreEt}) {
         rim.cbOut = '';
         rim.etOut = '';
       }
+    case ShotDials.brand:
+      _rimAt(draft, step.specIndex)?.brandOut = '';
     case ShotDials.rimSize:
       _rimAt(draft, step.specIndex)?.sizeOut = '';
     case ShotDials.et:

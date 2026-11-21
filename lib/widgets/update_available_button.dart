@@ -36,45 +36,44 @@ class UpdateOfferSheet extends StatefulWidget {
 }
 
 class _UpdateOfferSheetState extends State<UpdateOfferSheet> {
-  var _downloading = false;
-  double? _progress;
-  String? _note;
+  AppUpdateDownload? _job;
 
-  Future<void> _download() async {
-    if (_downloading) return;
-    setState(() {
-      _downloading = true;
-      _progress = 0;
-      _note = null;
-    });
-    try {
-      final file = await AppUpdate.download(widget.offer, (progress) {
-        if (!mounted) return;
-        setState(() => _progress = progress);
-      });
-      await AppUpdate.install(file);
-      if (!mounted) return;
-      setState(() => _note = 'Confirm the install on the next screen.');
-    } on InstallPermissionNeeded {
-      if (!mounted) return;
-      setState(() {
-        _note = 'Allow WheelShot to install apps, then tap Download again.';
-      });
-    } catch (e) {
-      if (!mounted) return;
-      setState(() => _note = 'Update failed. $e');
-    } finally {
-      if (mounted) {
-        setState(() {
-          _downloading = false;
-          _progress = null;
-        });
-      }
+  @override
+  void initState() {
+    super.initState();
+    final active = AppUpdate.activeDownload;
+    if (active != null &&
+        active.offer.versionCode == widget.offer.versionCode &&
+        active.offer.apkUrl == widget.offer.apkUrl) {
+      _attach(active);
     }
   }
 
   @override
+  void dispose() {
+    _job?.removeListener(_onJob);
+    super.dispose();
+  }
+
+  void _attach(AppUpdateDownload job) {
+    _job?.removeListener(_onJob);
+    _job = job;
+    _job!.addListener(_onJob);
+  }
+
+  void _onJob() {
+    if (mounted) setState(() {});
+  }
+
+  void _download() {
+    _attach(AppUpdate.beginDownload(widget.offer));
+    setState(() {});
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final job = _job;
+    final busy = job?.busy == true;
     return SafeArea(
       child: Padding(
         padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
@@ -90,24 +89,23 @@ class _UpdateOfferSheetState extends State<UpdateOfferSheet> {
             ),
             const SizedBox(height: 4),
             Text(
-              'A newer WheelShot is on GitHub.',
+              'A newer WheelShot is on GitHub. You can leave the app while it downloads.',
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
                     color: Colors.white60,
                   ),
             ),
-            if (_note != null) ...[
+            if (job?.note != null) ...[
               const SizedBox(height: 8),
-              Text(_note!),
+              Text(job!.note!),
             ],
-            if (_downloading) ...[
+            if (busy) ...[
               const SizedBox(height: 12),
-              LinearProgressIndicator(value: _progress),
+              LinearProgressIndicator(value: job?.progress),
             ],
             const SizedBox(height: 12),
             FilledButton(
-              onPressed: _downloading ? null : _download,
-              child:
-                  Text(_downloading ? 'Downloading…' : 'Download and install'),
+              onPressed: busy ? null : _download,
+              child: Text(busy ? 'Downloading…' : 'Download and install'),
             ),
           ],
         ),

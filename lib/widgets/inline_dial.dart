@@ -261,12 +261,30 @@ class _DialStripState extends State<DialStrip> {
               color: const Color(0xFF1C1F28),
               borderRadius: BorderRadius.circular(14),
             ),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: widget.children,
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: widget.children,
+              ),
             ),
           ),
       ],
+    );
+  }
+}
+
+/// Space and a hairline so neighboring dials stay separate controls.
+class DialGap extends StatelessWidget {
+  const DialGap({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 1,
+      height: 28,
+      margin: const EdgeInsets.symmetric(horizontal: 10),
+      color: Colors.white24,
     );
   }
 }

@@ -25,6 +25,7 @@ void main() {
     expect(steps[3].dials, ShotDials.tread);
     expect(steps[4].dials, ShotDials.dot);
     expect(steps[5].dials, ShotDials.hub);
+    expect(steps[6].dials, ShotDials.brand);
     expect(steps[7].dials, ShotDials.rimSize);
     expect(steps[8].dials, ShotDials.et);
   });

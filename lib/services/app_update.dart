@@ -1,6 +1,8 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path_provider/path_provider.dart';
@@ -48,8 +50,76 @@ AppUpdateOffer? parseLatestRelease(
 
 bool isNewerRelease(int remoteCode, int localCode) => remoteCode > localCode;
 
+/// Survives sheet dispose and brief background pauses. Retries with Range.
+class AppUpdateDownload extends ChangeNotifier {
+  AppUpdateDownload._(this.offer);
+
+  final AppUpdateOffer offer;
+  var busy = false;
+  double? progress;
+  String? note;
+  File? file;
+  Object? error;
+
+  Future<void>? _job;
+
+  Future<void> start() {
+    return _job ??= _run();
+  }
+
+  Future<void> _run() async {
+    busy = true;
+    progress = 0;
+    note = null;
+    error = null;
+    file = null;
+    notifyListeners();
+    try {
+      await AppUpdate._holdWake(true);
+      final apk = await AppUpdate._downloadResilient(offer, (p) {
+        progress = p;
+        notifyListeners();
+      });
+      file = apk;
+      note = 'Opening installer…';
+      notifyListeners();
+      await AppUpdate.install(apk);
+      note = 'Confirm the install on the next screen.';
+    } on InstallPermissionNeeded {
+      error = InstallPermissionNeeded();
+      note = 'Allow WheelShot to install apps, then tap Download again.';
+    } catch (e) {
+      error = e;
+      note = 'Update failed. $e';
+    } finally {
+      await AppUpdate._holdWake(false);
+      busy = false;
+      _job = null;
+      notifyListeners();
+    }
+  }
+}
+
 class AppUpdate {
   static const _channel = MethodChannel('com.wheelshot.app/update');
+  static AppUpdateDownload? _active;
+
+  static AppUpdateDownload? get activeDownload => _active;
+
+  /// Same job if a download for this offer is already running.
+  static AppUpdateDownload beginDownload(AppUpdateOffer offer) {
+    final current = _active;
+    if (current != null &&
+        current.busy &&
+        current.offer.versionCode == offer.versionCode &&
+        current.offer.apkUrl == offer.apkUrl) {
+      return current;
+    }
+    final job = AppUpdateDownload._(offer);
+    _active = job;
+    unawaited(job.start());
+    return job;
+  }
 
   /// Newer GitHub release, or null when this install is current or the
   /// check cannot be made.
@@ -99,28 +169,81 @@ class AppUpdate {
     }
   }
 
-  static Future<File> download(
+  static Future<void> _holdWake(bool on) async {
+    try {
+      await _channel.invokeMethod<void>(on ? 'wakeLock' : 'wakeUnlock');
+    } catch (_) {}
+  }
+
+  static Future<File> _downloadResilient(
     AppUpdateOffer offer,
     void Function(double? progress) onProgress,
   ) async {
+    final dir = await getTemporaryDirectory();
+    final file = File('${dir.path}/wheelshot-update.apk');
+    Object? lastError;
+    for (var attempt = 0; attempt < 5; attempt++) {
+      try {
+        await _downloadOnce(offer, file, onProgress);
+        return file;
+      } catch (e) {
+        lastError = e;
+        if (attempt == 4) break;
+        await Future<void>.delayed(Duration(milliseconds: 400 * (attempt + 1)));
+      }
+    }
+    throw lastError ?? const HttpException('download failed');
+  }
+
+  static Future<void> _downloadOnce(
+    AppUpdateOffer offer,
+    File file,
+    void Function(double? progress) onProgress,
+  ) async {
     final client = HttpClient();
+    client.connectionTimeout = const Duration(seconds: 30);
+    client.idleTimeout = const Duration(seconds: 60);
     try {
+      var have = 0;
+      if (await file.exists()) {
+        have = await file.length();
+      }
       final request = await client.getUrl(Uri.parse(offer.apkUrl));
       request.headers.set(HttpHeaders.userAgentHeader, 'wheelshot');
       request.followRedirects = true;
+      if (have > 0) {
+        request.headers.set(HttpHeaders.rangeHeader, 'bytes=$have-');
+      }
       final response =
-          await request.close().timeout(const Duration(seconds: 30));
-      if (response.statusCode != 200) {
+          await request.close().timeout(const Duration(seconds: 45));
+      if (response.statusCode == 200) {
+        if (have > 0) {
+          await file.writeAsBytes(const [], flush: true);
+          have = 0;
+        }
+      } else if (response.statusCode == 206) {
+        // Resume.
+      } else {
         await response.drain<void>();
         throw HttpException('download failed ${response.statusCode}');
       }
-      final dir = await getTemporaryDirectory();
-      final file = File('${dir.path}/wheelshot-update.apk');
-      final sink = file.openWrite();
-      var received = 0;
-      final total = response.contentLength;
+
+      final sink = file.openWrite(
+        mode: have > 0 ? FileMode.append : FileMode.write,
+      );
+      var received = have;
+      final contentLen = response.contentLength;
+      final total = contentLen < 0
+          ? -1
+          : (response.statusCode == 206 ? have + contentLen : contentLen);
       try {
-        await for (final chunk in response) {
+        await for (final chunk in response.timeout(
+          const Duration(seconds: 45),
+          onTimeout: (sink) {
+            sink.addError(TimeoutException('download stalled'));
+            sink.close();
+          },
+        )) {
           received += chunk.length;
           sink.add(chunk);
           if (total > 0) {
@@ -132,7 +255,13 @@ class AppUpdate {
       } finally {
         await sink.close();
       }
-      return file;
+      if (total > 0 && received < total) {
+        throw HttpException('download incomplete $received/$total');
+      }
+      if (received < 1024) {
+        throw HttpException('download too small ($received bytes)');
+      }
+      onProgress(1);
     } finally {
       client.close(force: true);
     }

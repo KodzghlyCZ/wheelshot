@@ -660,44 +660,43 @@ class _SpecsScreenState extends State<SpecsScreen> {
           ],
         ),
         const SizedBox(height: 12),
-        for (var d = 0; d < c.treadDepths.length; d++)
-          DialStrip(
-            label: c.treadDepths.length == 1
-                ? 'Tread depth (mm)'
-                : 'Tread depth ${d + 1} (mm)',
-            manualHint: 'e.g. 4.5',
-            dialText: () => _fmtTread(c.treadDepths[d]),
-            onResetToDefaults: () => setState(() {
-              c.treadDepths[d] = 3.0;
-              c.treadManual = null;
-            }),
-            onManualChanged: (v) => setState(() => c.treadManual = v),
-            onDuplicate: _dup(i, () {
-              setState(() {
-                c.treadDepths = List.of(prev!.treadDepths);
-                c.treadManual = prev.treadManual;
-              });
-            }),
-            children: [
+        DialStrip(
+          label: 'Tread depth (mm)',
+          manualHint: 'e.g. 6.0, 4.5',
+          dialText: () => c.treadDepths.map(_fmtTread).join(', '),
+          onResetToDefaults: () => setState(() {
+            c.resetTreadDefaults();
+          }),
+          onManualChanged: (v) => setState(() => c.treadManual = v),
+          onDuplicate: _dup(i, () {
+            setState(() {
+              c.treadDepths = List.of(prev!.treadDepths);
+              c.treadManual = prev.treadManual;
+            });
+          }),
+          children: [
+            for (var d = 0; d < c.treadDepths.length; d++) ...[
+              if (d > 0) const DialGap(),
               InlineDial<double>(
                 values: _treadValues,
                 value: c.treadDepths[d],
-                width: 72,
+                width: 64,
                 labelOf: _fmtTread,
-                onChanged: (v) => setState(() => c.treadDepths[d] = v),
+                onChanged: (v) => setState(() {
+                  c.treadDepths[d] = v;
+                  c.treadManual = null;
+                }),
               ),
             ],
-          ),
-        Align(
-          alignment: Alignment.centerLeft,
-          child: IconButton(
-            tooltip: 'Add tread depth',
-            onPressed: () => setState(() {
-              c.treadDepths.add(c.treadDepths.last);
-              c.treadManual = null;
-            }),
-            icon: const Icon(Icons.add),
-          ),
+            IconButton(
+              tooltip: 'Add tread depth',
+              onPressed: () => setState(() {
+                c.treadDepths.add(c.treadDepths.last);
+                c.treadManual = null;
+              }),
+              icon: const Icon(Icons.add),
+            ),
+          ],
         ),
         const SizedBox(height: 12),
         Row(
