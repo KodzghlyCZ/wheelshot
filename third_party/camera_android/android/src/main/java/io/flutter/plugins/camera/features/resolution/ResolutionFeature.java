@@ -316,21 +316,34 @@ public class ResolutionFeature extends CameraFeature<ResolutionPreset> {
    * CamcorderProfile sizes are video sizes. On Pixel phones those are 16:9 center crops of the 4:3
    * photo sensor, so ResolutionPreset.max looks zoomed next to the system camera. Replace capture
    * and preview with full-sensor still sizes. Recording profiles stay on the video profile.
+   *
+   * <p>A 16:9 active array is that same video crop. The still sensor is 4:3, so the target aspect
+   * stays 4:3 unless the reported array is already near 4:3.
    */
   private void applyFullSensorPhotoSizes() {
     try {
       Rect active = cameraProperties.getSensorInfoActiveArraySize();
-      if (active == null || active.width() <= 0 || active.height() <= 0) {
-        return;
-      }
-      float sensorAspect = active.width() / (float) active.height();
       StreamConfigurationMap map = cameraProperties.getScalerStreamConfigurationMap();
       if (map == null) {
+        Log.e("ResolutionFeature", "Full-FOV: no stream map");
         return;
       }
-      Size capture = selectFullFovSize(map.getOutputSizes(ImageFormat.JPEG), sensorAspect, 4096);
+      float sensorAspect = 4f / 3f;
+      if (active != null && active.width() > 0 && active.height() > 0) {
+        float reported =
+            Math.max(active.width(), active.height())
+                / (float) Math.min(active.width(), active.height());
+        if (reported < 1.5f) {
+          sensorAspect = reported;
+        }
+      }
+      Size[] jpeg =
+          join(
+              map.getOutputSizes(ImageFormat.JPEG),
+              map.getHighResolutionOutputSizes(ImageFormat.JPEG));
+      Size capture = selectFullFovSize(jpeg, sensorAspect, 4096);
       if (capture == null) {
-        capture = selectFullFovSize(map.getOutputSizes(ImageFormat.JPEG), sensorAspect, 0);
+        capture = selectFullFovSize(jpeg, sensorAspect, 0);
       }
       Size[] previewChoices = map.getOutputSizes(SurfaceTexture.class);
       if (previewChoices == null || previewChoices.length == 0) {
@@ -338,6 +351,9 @@ public class ResolutionFeature extends CameraFeature<ResolutionPreset> {
       }
       if (previewChoices == null || previewChoices.length == 0) {
         previewChoices = map.getOutputSizes(ImageFormat.PRIVATE);
+      }
+      if (previewChoices == null || previewChoices.length == 0) {
+        previewChoices = map.getOutputSizes(ImageFormat.YUV_420_888);
       }
       Size preview = selectFullFovSize(previewChoices, sensorAspect, 1920);
       if (preview == null) {
@@ -352,19 +368,34 @@ public class ResolutionFeature extends CameraFeature<ResolutionPreset> {
       if (preview != null) {
         this.previewSize = preview;
       }
-      Log.i(
+      Log.e(
           "ResolutionFeature",
-          "Full-FOV still sizes capture="
+          "Full-FOV capture="
               + captureSize
               + " preview="
               + previewSize
-              + " sensor="
-              + active.width()
-              + "x"
-              + active.height());
+              + " target="
+              + sensorAspect
+              + " active="
+              + (active == null ? "null" : active.width() + "x" + active.height())
+              + " jpegChoices="
+              + (jpeg == null ? 0 : jpeg.length));
     } catch (RuntimeException e) {
-      Log.w("ResolutionFeature", "Full-FOV size selection failed", e);
+      Log.e("ResolutionFeature", "Full-FOV size selection failed", e);
     }
+  }
+
+  private static Size[] join(Size[] first, Size[] second) {
+    if (first == null || first.length == 0) {
+      return second;
+    }
+    if (second == null || second.length == 0) {
+      return first;
+    }
+    Size[] out = new Size[first.length + second.length];
+    System.arraycopy(first, 0, out, 0, first.length);
+    System.arraycopy(second, 0, out, first.length, second.length);
+    return out;
   }
 
   /**

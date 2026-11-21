@@ -74,7 +74,9 @@ class _SpecsScreenState extends State<SpecsScreen> {
       if (!kTireConstructions.contains(t.construction)) t.construction = 'R';
       if (!kTirePrefixes.contains(t.prefix)) t.prefix = '';
       if (!kTireSuffixes.contains(t.suffix)) t.suffix = '';
-      t.treadMm = _nearestDouble(_treadValues, t.treadMm);
+      t.treadDepths = [
+        for (final v in t.treadDepths) _nearestDouble(_treadValues, v),
+      ];
     }
 
     _loadSavedSpecs();
@@ -195,12 +197,30 @@ class _SpecsScreenState extends State<SpecsScreen> {
     }
 
     final treadRaw = t.treadMm.trim();
-    final tread = double.tryParse(treadRaw.replaceAll(',', '.'));
-    if (tread != null) {
-      c.treadMm = _nearestDouble(_treadValues, tread);
-      c.treadManual = _treadValues.contains(tread) ? null : treadRaw;
-    } else if (treadRaw.isNotEmpty) {
-      c.treadManual = treadRaw;
+    final bits = treadRaw
+        .split(RegExp(r'\s*[,;/|]\s*'))
+        .where((s) => s.isNotEmpty)
+        .toList();
+    if (bits.length > 1) {
+      final vals = <double>[];
+      for (final bit in bits) {
+        final n = double.tryParse(bit.replaceAll(',', '.'));
+        if (n != null) vals.add(_nearestDouble(_treadValues, n));
+      }
+      if (vals.isNotEmpty) {
+        c.treadDepths = vals;
+        c.treadManual = null;
+      } else {
+        c.treadManual = treadRaw;
+      }
+    } else {
+      final tread = double.tryParse(treadRaw.replaceAll(',', '.'));
+      if (tread != null) {
+        c.treadDepths = [_nearestDouble(_treadValues, tread)];
+        c.treadManual = _treadValues.contains(tread) ? null : treadRaw;
+      } else if (treadRaw.isNotEmpty) {
+        c.treadManual = treadRaw;
+      }
     }
 
     c.season = t.season;
@@ -640,27 +660,44 @@ class _SpecsScreenState extends State<SpecsScreen> {
           ],
         ),
         const SizedBox(height: 12),
-        DialStrip(
-          label: 'Tread depth (mm)',
-          manualHint: 'e.g. 4.5',
-          dialText: () => _fmtTread(c.treadMm),
-          onResetToDefaults: () => setState(c.resetTreadDefaults),
-          onManualChanged: (v) => setState(() => c.treadManual = v),
-          onDuplicate: _dup(i, () {
-            setState(() {
-              c.treadMm = prev!.treadMm;
-              c.treadManual = prev.treadManual;
-            });
-          }),
-          children: [
-            InlineDial<double>(
-              values: _treadValues,
-              value: c.treadMm,
-              width: 72,
-              labelOf: _fmtTread,
-              onChanged: (v) => setState(() => c.treadMm = v),
-            ),
-          ],
+        for (var d = 0; d < c.treadDepths.length; d++)
+          DialStrip(
+            label: c.treadDepths.length == 1
+                ? 'Tread depth (mm)'
+                : 'Tread depth ${d + 1} (mm)',
+            manualHint: 'e.g. 4.5',
+            dialText: () => _fmtTread(c.treadDepths[d]),
+            onResetToDefaults: () => setState(() {
+              c.treadDepths[d] = 3.0;
+              c.treadManual = null;
+            }),
+            onManualChanged: (v) => setState(() => c.treadManual = v),
+            onDuplicate: _dup(i, () {
+              setState(() {
+                c.treadDepths = List.of(prev!.treadDepths);
+                c.treadManual = prev.treadManual;
+              });
+            }),
+            children: [
+              InlineDial<double>(
+                values: _treadValues,
+                value: c.treadDepths[d],
+                width: 72,
+                labelOf: _fmtTread,
+                onChanged: (v) => setState(() => c.treadDepths[d] = v),
+              ),
+            ],
+          ),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: IconButton(
+            tooltip: 'Add tread depth',
+            onPressed: () => setState(() {
+              c.treadDepths.add(c.treadDepths.last);
+              c.treadManual = null;
+            }),
+            icon: const Icon(Icons.add),
+          ),
         ),
         const SizedBox(height: 12),
         Row(
@@ -830,7 +867,7 @@ class _TireControllers {
   String suffix = '';
   int dotWeek = 1;
   int dotYear = 23;
-  double treadMm = 3.0;
+  List<double> treadDepths = [3.0];
   String season = '';
   bool extraLoad = false;
   bool runFlat = false;
@@ -871,7 +908,7 @@ class _TireControllers {
   }
 
   void resetTreadDefaults() {
-    treadMm = 3.0;
+    treadDepths = [3.0];
     treadManual = null;
   }
 
@@ -884,7 +921,7 @@ class _TireControllers {
         : dotLabel;
     final tread = (treadManual != null && treadManual!.trim().isNotEmpty)
         ? treadManual!.trim()
-        : treadMm.toStringAsFixed(1);
+        : treadDepths.map((v) => v.toStringAsFixed(1)).join(', ');
 
     return TireSpecs(
       brand: brand.text,

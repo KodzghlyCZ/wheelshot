@@ -7,6 +7,8 @@ import 'package:flutter/services.dart';
 import 'package:native_device_orientation/native_device_orientation.dart';
 
 import '../models/shoot_plan.dart';
+import '../vision/bolt_pattern.dart';
+import '../widgets/bolt_pattern_overlay.dart';
 
 class CameraScreen extends StatefulWidget {
   const CameraScreen({super.key, required this.step});
@@ -29,6 +31,10 @@ class _CameraScreenState extends State<CameraScreen>
   bool _torchOn = false;
   Offset? _focusUi;
   Timer? _focusHide;
+  BoltPattern? _pattern;
+  final _hold = BoltPatternHold();
+  var _patternBusy = false;
+
   /// Sensor tilt while Activity stays portrait — drives hint/guide + JPEG EXIF.
   NativeDeviceOrientation _sensorOrientation =
       NativeDeviceOrientation.portraitUp;
@@ -75,20 +81,32 @@ class _CameraScreenState extends State<CameraScreen>
     await old?.dispose();
 
     final description = _cameras[index];
+    final hub = widget.step.guide == ShotGuide.centerHub;
     final controller = CameraController(
       description,
       // Full sensor still (4:3 on Pixel), not the plugin's 16:9 video crop.
       ResolutionPreset.max,
       enableAudio: false,
-      imageFormatGroup: ImageFormatGroup.jpeg,
+      imageFormatGroup: hub ? ImageFormatGroup.yuv420 : ImageFormatGroup.jpeg,
     );
     await controller.initialize();
     await controller.setFocusMode(FocusMode.auto);
     await controller.setExposureMode(ExposureMode.auto);
-    // Activity is portrait-locked; we stamp EXIF from the sensor at capture.
-    try {
-      await controller.unlockCaptureOrientation();
-    } catch (_) {}
+    // Activity is portrait-locked. Hub stays portrait so the square crop and
+    // the bolt overlay share one upright frame. Other shots stamp EXIF from
+    // the sensor at capture.
+    if (hub) {
+      try {
+        await controller.lockCaptureOrientation(DeviceOrientation.portraitUp);
+      } catch (_) {}
+      try {
+        await controller.startImageStream(_onHubFrame);
+      } catch (_) {}
+    } else {
+      try {
+        await controller.unlockCaptureOrientation();
+      } catch (_) {}
+    }
 
     if (widget.step.preferTorch) {
       try {
@@ -182,16 +200,22 @@ class _CameraScreenState extends State<CameraScreen>
       try {
         await c.setFocusMode(FocusMode.locked);
       } catch (_) {}
+      final hub = widget.step.guide == ShotGuide.centerHub;
       // Stamp JPEG/EXIF from sensor tilt (Activity stays portrait).
-      try {
-        await c.lockCaptureOrientation(
-          _deviceOrientation(_sensorOrientation),
-        );
-      } catch (_) {}
+      // The hub shot stays locked upright with the square viewfinder.
+      if (!hub) {
+        try {
+          await c.lockCaptureOrientation(
+            _deviceOrientation(_sensorOrientation),
+          );
+        } catch (_) {}
+      }
       final file = await c.takePicture();
-      try {
-        await c.unlockCaptureOrientation();
-      } catch (_) {}
+      if (!hub) {
+        try {
+          await c.unlockCaptureOrientation();
+        } catch (_) {}
+      }
       try {
         await c.setFocusMode(FocusMode.auto);
       } catch (_) {}
@@ -237,6 +261,25 @@ class _CameraScreenState extends State<CameraScreen>
     super.dispose();
   }
 
+  bool get _hub => widget.step.guide == ShotGuide.centerHub;
+
+  void _onHubFrame(CameraImage image) {
+    if (_patternBusy) return;
+    final controller = _controller;
+    if (controller == null) return;
+    _patternBusy = true;
+    final sensor = controller.description.sensorOrientation;
+    analyzeCameraFrame(image, sensor).then((pattern) {
+      _patternBusy = false;
+      if (!mounted) return;
+      final shown = _hold.push(pattern);
+      if (identical(shown, _pattern)) return;
+      setState(() => _pattern = shown);
+    }).catchError((_) {
+      _patternBusy = false;
+    });
+  }
+
   String get _cameraLabel {
     if (_cameras.isEmpty) return '';
     final cam = _cameras[_cameraIndex];
@@ -267,8 +310,7 @@ class _CameraScreenState extends State<CameraScreen>
           DeviceOrientation.landscapeLeft,
         NativeDeviceOrientation.landscapeRight =>
           DeviceOrientation.landscapeRight,
-        NativeDeviceOrientation.portraitDown =>
-          DeviceOrientation.portraitDown,
+        NativeDeviceOrientation.portraitDown => DeviceOrientation.portraitDown,
         _ => DeviceOrientation.portraitUp,
       };
 
@@ -323,83 +365,95 @@ class _CameraScreenState extends State<CameraScreen>
           _sensorOrientation = next;
           final turns = _chromeTurns(_sensorOrientation);
 
+          final previewReady =
+              _error == null && _ready && _controller != null && !_switching;
           return SafeArea(
             child: Column(
               children: [
                 topBar,
-                Expanded(
-                  child: Stack(
-                    fit: StackFit.expand,
-                    children: [
-                      if (_error != null)
-                        Center(
-                          child: Padding(
-                            padding: const EdgeInsets.all(24),
-                            child: Text(
-                              _error!,
-                              style: const TextStyle(color: Colors.white70),
-                              textAlign: TextAlign.center,
+                if (_hub && previewReady)
+                  AspectRatio(
+                    aspectRatio: 1,
+                    child: _SquareHubPreview(
+                      controller: _controller!,
+                      pattern: _pattern,
+                      focusUi: _focusUi,
+                      onTapFocus: _onTapFocus,
+                      onFocusUi: (o) => setState(() => _focusUi = o),
+                    ),
+                  )
+                else
+                  Expanded(
+                    child: Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        if (_error != null)
+                          Center(
+                            child: Padding(
+                              padding: const EdgeInsets.all(24),
+                              child: Text(
+                                _error!,
+                                style: const TextStyle(color: Colors.white70),
+                                textAlign: TextAlign.center,
+                              ),
+                            ),
+                          )
+                        else if (!previewReady)
+                          const Center(child: CircularProgressIndicator())
+                        else
+                          Padding(
+                            padding: const EdgeInsets.all(8),
+                            child: _ContainPreview(
+                              controller: _controller!,
+                              focusUi: _focusUi,
+                              guide: widget.step.guide,
+                              chromeTurns: turns,
+                              onTapFocus: _onTapFocus,
+                              onFocusUi: (o) => setState(() => _focusUi = o),
                             ),
                           ),
-                        )
-                      else if (!_ready ||
-                          _controller == null ||
-                          _switching)
-                        const Center(child: CircularProgressIndicator())
-                      else
-                        Padding(
-                          padding: const EdgeInsets.all(8),
-                          child: _ContainPreview(
-                            controller: _controller!,
-                            focusUi: _focusUi,
-                            guide: widget.step.guide,
-                            chromeTurns: turns,
-                            onTapFocus: _onTapFocus,
-                            onFocusUi: (o) =>
-                                setState(() => _focusUi = o),
-                          ),
-                        ),
-                      // Gravity chrome: rotate a full-bleed layer so
-                      // Alignment.bottomCenter is always the physical bottom.
-                      Positioned.fill(
-                        child: IgnorePointer(
-                          child: Transform.rotate(
-                            angle: turns * math.pi / 2,
-                            child: Align(
-                              alignment: Alignment.bottomCenter,
-                              child: Padding(
-                                padding: const EdgeInsets.fromLTRB(
-                                  16,
-                                  8,
-                                  16,
-                                  12,
-                                ),
-                                child: ConstrainedBox(
-                                  constraints: BoxConstraints(
-                                    maxWidth: MediaQuery.sizeOf(context)
-                                            .shortestSide *
-                                        0.88,
+                        // Gravity chrome: rotate a full-bleed layer so
+                        // Alignment.bottomCenter is always the physical bottom.
+                        Positioned.fill(
+                          child: IgnorePointer(
+                            child: Transform.rotate(
+                              angle: turns * math.pi / 2,
+                              child: Align(
+                                alignment: Alignment.bottomCenter,
+                                child: Padding(
+                                  padding: const EdgeInsets.fromLTRB(
+                                    16,
+                                    8,
+                                    16,
+                                    12,
                                   ),
-                                  child: DecoratedBox(
-                                    decoration: BoxDecoration(
-                                      color: Colors.black54,
-                                      borderRadius: BorderRadius.circular(10),
+                                  child: ConstrainedBox(
+                                    constraints: BoxConstraints(
+                                      maxWidth: MediaQuery.sizeOf(context)
+                                              .shortestSide *
+                                          0.88,
                                     ),
-                                    child: Padding(
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 12,
-                                        vertical: 8,
+                                    child: DecoratedBox(
+                                      decoration: BoxDecoration(
+                                        color: Colors.black54,
+                                        borderRadius: BorderRadius.circular(10),
                                       ),
-                                      child: Text(
-                                        widget.step.hint,
-                                        style: const TextStyle(
-                                          color: Colors.white,
-                                          fontSize: 13,
-                                          height: 1.25,
+                                      child: Padding(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 12,
+                                          vertical: 8,
                                         ),
-                                        textAlign: TextAlign.center,
-                                        maxLines: 2,
-                                        overflow: TextOverflow.ellipsis,
+                                        child: Text(
+                                          widget.step.hint,
+                                          style: const TextStyle(
+                                            color: Colors.white,
+                                            fontSize: 13,
+                                            height: 1.25,
+                                          ),
+                                          textAlign: TextAlign.center,
+                                          maxLines: 2,
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
                                       ),
                                     ),
                                   ),
@@ -408,10 +462,28 @@ class _CameraScreenState extends State<CameraScreen>
                             ),
                           ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
-                ),
+                if (_hub && previewReady) ...[
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 10, 16, 4),
+                    child: Text(
+                      _pattern == null
+                          ? widget.step.hint
+                          : _pattern!.hasBolts
+                              ? '${_pattern!.boltCount} bolts'
+                              : 'Center bore',
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 16,
+                      ),
+                    ),
+                  ),
+                  const Spacer(),
+                ],
                 controls,
               ],
             ),
@@ -490,15 +562,12 @@ class _CaptureControls extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               children: [
                 IconButton(
-                  tooltip:
-                      cameraCount > 1 ? cameraLabel : 'Only one rear lens',
-                  onPressed:
-                      (cameraCount > 1 && !switching) ? onSwitch : null,
+                  tooltip: cameraCount > 1 ? cameraLabel : 'Only one rear lens',
+                  onPressed: (cameraCount > 1 && !switching) ? onSwitch : null,
                   iconSize: 28,
                   icon: Icon(
                     Icons.cameraswitch,
-                    color:
-                        cameraCount > 1 ? Colors.white : Colors.white38,
+                    color: cameraCount > 1 ? Colors.white : Colors.white38,
                   ),
                 ),
                 if (cameraCount > 1)
@@ -513,6 +582,74 @@ class _CaptureControls extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// Full-sensor preview, center-cropped to a square. The bolt overlay is
+/// drawn on the full frame, so the aim dot stays in the middle of the crop.
+class _SquareHubPreview extends StatelessWidget {
+  const _SquareHubPreview({
+    required this.controller,
+    required this.pattern,
+    required this.focusUi,
+    required this.onTapFocus,
+    required this.onFocusUi,
+  });
+
+  final CameraController controller;
+  final BoltPattern? pattern;
+  final Offset? focusUi;
+  final Future<void> Function(TapDownDetails details, Size previewSize)
+      onTapFocus;
+  final ValueChanged<Offset?> onFocusUi;
+
+  @override
+  Widget build(BuildContext context) {
+    const previewWidth = 1080.0;
+    final displayedAspect = 1 / controller.value.aspectRatio;
+    return ClipRect(
+      child: FittedBox(
+        fit: BoxFit.cover,
+        alignment: Alignment.center,
+        child: SizedBox(
+          width: previewWidth,
+          height: previewWidth / displayedAspect,
+          child: Builder(
+            builder: (previewContext) {
+              return GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTapDown: (details) {
+                  final box = previewContext.findRenderObject() as RenderBox?;
+                  final size = (box != null && box.hasSize)
+                      ? box.size
+                      : Size(previewWidth, previewWidth / displayedAspect);
+                  onFocusUi(details.localPosition);
+                  onTapFocus(details, size);
+                },
+                child: Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    CameraPreview(
+                      controller,
+                      child: CustomPaint(
+                        painter: BoltPatternOverlayPainter(pattern),
+                        child: const SizedBox.expand(),
+                      ),
+                    ),
+                    if (focusUi != null)
+                      Positioned(
+                        left: focusUi!.dx - 36,
+                        top: focusUi!.dy - 36,
+                        child: const IgnorePointer(child: _FocusReticle()),
+                      ),
+                  ],
+                ),
+              );
+            },
+          ),
+        ),
       ),
     );
   }
@@ -547,7 +684,7 @@ class _ContainPreview extends StatelessWidget {
           height: constraints.maxHeight,
           child: FittedBox(
             fit: BoxFit.contain,
-            alignment: Alignment.center,
+            alignment: Alignment.topCenter,
             child: _PreviewStack(
               controller: controller,
               focusUi: focusUi,
@@ -753,6 +890,7 @@ class _GuidePainter extends CustomPainter {
           ),
           stroke,
         );
+      case ShotGuide.centerHub:
       case ShotGuide.none:
         break;
     }

@@ -13,6 +13,7 @@ class PcdSelector extends StatelessWidget {
     required this.onResetToDefaults,
     required this.onManualChanged,
     this.onDuplicate,
+    this.reportLive = false,
   });
 
   final int bolts;
@@ -22,6 +23,7 @@ class PcdSelector extends StatelessWidget {
   final VoidCallback onResetToDefaults;
   final ValueChanged<String?> onManualChanged;
   final VoidCallback? onDuplicate;
+  final bool reportLive;
 
   @override
   Widget build(BuildContext context) {
@@ -39,6 +41,7 @@ class PcdSelector extends StatelessWidget {
           width: 52,
           labelOf: (b) => '$b',
           onChanged: onBoltsChanged,
+          reportLive: reportLive,
         ),
         const DialSep('x'),
         InlineDial<double>(
@@ -47,6 +50,7 @@ class PcdSelector extends StatelessWidget {
           width: 80,
           labelOf: _fmtMm,
           onChanged: onDiameterChanged,
+          reportLive: reportLive,
         ),
       ],
     );
@@ -142,6 +146,7 @@ class EtSelector extends StatelessWidget {
     required this.onResetToDefaults,
     required this.onManualChanged,
     this.onDuplicate,
+    this.reportLive = false,
   });
 
   final int et;
@@ -149,6 +154,7 @@ class EtSelector extends StatelessWidget {
   final VoidCallback onResetToDefaults;
   final ValueChanged<String?> onManualChanged;
   final VoidCallback? onDuplicate;
+  final bool reportLive;
 
   @override
   Widget build(BuildContext context) {
@@ -167,6 +173,7 @@ class EtSelector extends StatelessWidget {
           width: 72,
           labelOf: (e) => '$e',
           onChanged: onChanged,
+          reportLive: reportLive,
         ),
       ],
     );

@@ -22,6 +22,7 @@ class TireSizeSelector extends StatelessWidget {
     required this.onResetToDefaults,
     required this.onManualChanged,
     this.onDuplicate,
+    this.reportLive = false,
   });
 
   final String prefix;
@@ -39,6 +40,7 @@ class TireSizeSelector extends StatelessWidget {
   final VoidCallback onResetToDefaults;
   final ValueChanged<String?> onManualChanged;
   final VoidCallback? onDuplicate;
+  final bool reportLive;
 
   @override
   Widget build(BuildContext context) {
@@ -67,6 +69,7 @@ class TireSizeSelector extends StatelessWidget {
               width: 48,
               labelOf: (p) => p.isEmpty ? '–' : p,
               onChanged: onPrefixChanged,
+              reportLive: reportLive,
             ),
             InlineDial<int>(
               values: kTireWidths,
@@ -74,6 +77,7 @@ class TireSizeSelector extends StatelessWidget {
               width: 52,
               labelOf: (w) => '$w',
               onChanged: onWidthChanged,
+              reportLive: reportLive,
             ),
             const DialSep('/'),
             InlineDial<int>(
@@ -82,6 +86,7 @@ class TireSizeSelector extends StatelessWidget {
               width: 44,
               labelOf: (a) => '$a',
               onChanged: onAspectChanged,
+              reportLive: reportLive,
             ),
             InlineDial<String>(
               values: kTireConstructions,
@@ -89,6 +94,7 @@ class TireSizeSelector extends StatelessWidget {
               width: 42,
               labelOf: (k) => k,
               onChanged: onConstructionChanged,
+              reportLive: reportLive,
             ),
             InlineDial<int>(
               values: kTireDiameters,
@@ -96,6 +102,7 @@ class TireSizeSelector extends StatelessWidget {
               width: 44,
               labelOf: (d) => '$d',
               onChanged: onDiameterChanged,
+              reportLive: reportLive,
             ),
             InlineDial<String>(
               values: kTireSuffixes,
@@ -103,6 +110,7 @@ class TireSizeSelector extends StatelessWidget {
               width: 48,
               labelOf: (s) => s.isEmpty ? '–' : s,
               onChanged: onSuffixChanged,
+              reportLive: reportLive,
             ),
           ],
         ),

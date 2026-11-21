@@ -17,12 +17,10 @@ extension ShootCategoryX on ShootCategory {
   String get subtitle => switch (this) {
         ShootCategory.wheelSet =>
           'Mounted wheels — pick piece count + tire/rim types',
-        ShootCategory.rimsOnly =>
-          'Bare rims — brand, size, ET; group by type',
+        ShootCategory.rimsOnly => 'Bare rims — brand, size, ET; group by type',
         ShootCategory.tiresOnly =>
           'Loose tires — overall, tread, DOT, size by type',
-        ShootCategory.spare =>
-          'One spare — tire shots (+ rim if mounted)',
+        ShootCategory.spare => 'One spare — tire shots (+ rim if mounted)',
       };
 
   bool get includesTire => this != ShootCategory.rimsOnly;
@@ -119,6 +117,8 @@ class ShootConfig {
       );
 }
 
+enum ShotDials { none, tireSize, tread, dot, hub, rimSize, et }
+
 class ShotStep {
   const ShotStep({
     required this.id,
@@ -127,6 +127,8 @@ class ShotStep {
     this.preferTorch = false,
     this.guide = ShotGuide.none,
     this.isExtra = false,
+    this.dials = ShotDials.none,
+    this.specIndex = 0,
   });
 
   final String id;
@@ -135,6 +137,12 @@ class ShotStep {
   final bool preferTorch;
   final ShotGuide guide;
   final bool isExtra;
+
+  /// Which spec dials sit under the preview. [none] is photo only.
+  final ShotDials dials;
+
+  /// Rim type index for [ShotDials.hub], [ShotDials.rimSize], and [ShotDials.et].
+  final int specIndex;
 }
 
 enum ShotGuide {
@@ -144,6 +152,7 @@ enum ShotGuide {
   dotCloseup,
   sidewallSize,
   rimStamp,
+  centerHub,
 }
 
 List<ShotStep> buildWizard({
@@ -153,61 +162,34 @@ List<ShotStep> buildWizard({
   List<String> etNotes = const [],
 }) {
   if (category == ShootCategory.spare) {
-    final steps = <ShotStep>[..._tireFullSteps(prefix: '', filePrefix: '01')];
+    final steps = <ShotStep>[
+      ..._leadShots(pieces: 1),
+      ..._tireShots(),
+    ];
     if (spareHasRim) {
-      steps.addAll(_rimSteps(prefix: '', filePrefix: '01'));
+      steps.addAll(_rimTypeShots(prefix: 'Rim · ', filePrefix: '01', index: 0));
     }
     return steps;
   }
 
   final c = config.forCategory(category);
-  final steps = <ShotStep>[];
+  final steps = <ShotStep>[..._leadShots(pieces: c.pieceCount)];
 
-  final tireCount = category.includesTire ? c.tireTypes : 0;
-  final rimCount = category.includesRim ? c.rimTypes : 0;
+  if (category.includesTire) steps.addAll(_tireShots());
+  if (!category.includesRim) return steps;
 
-  // --- Tires ---
-  if (tireCount >= 1) {
-    // Multi-piece / multi-type: one set overall, then per-type details (no
-    // repeated overall). Single piece + single type: full tire block.
-    final sharedOverall = c.pieceCount > 1 || tireCount > 1;
-    if (sharedOverall) {
-      steps.add(
-        const ShotStep(
-          id: 'set_overall',
-          title: 'Set · overall',
-          hint: 'Stand back. Capture the whole set / group once so the '
-              'listing shows what is included.',
-          guide: ShotGuide.overallFrame,
-        ),
-      );
-      for (var t = 1; t <= tireCount; t++) {
-        final label = tireCount == 1 ? 'Tire' : 'Tire type $t';
-        final fp = tireCount == 1 ? 'type1' : 'tire$t';
-        steps.addAll(
-          _tireDetailSteps(prefix: '$label · ', filePrefix: fp),
-        );
-      }
-    } else {
-      steps.addAll(
-        _tireFullSteps(prefix: 'Tire · ', filePrefix: 'type1'),
-      );
-    }
-  }
-
-  // --- Rims ---
-  if (!category.includesRim || rimCount < 1) return steps;
-
+  final rimCount = c.rimTypes;
   if (c.etOnlyByAxis && rimCount > 1) {
     steps.addAll(
-      _rimFaceSteps(prefix: 'Shared rim · ', filePrefix: 'shared'),
+      _rimFaceShots(prefix: 'Shared rim · ', filePrefix: 'shared', index: 0),
     );
-    for (var r = 1; r <= rimCount; r++) {
-      final note = r <= etNotes.length ? etNotes[r - 1] : null;
+    for (var r = 0; r < rimCount; r++) {
+      final note = r < etNotes.length ? etNotes[r] : null;
       steps.add(
-        _etStep(
-          prefix: 'Rim type $r · ',
-          filePrefix: 'type$r',
+        _etShot(
+          prefix: 'Rim type ${r + 1} · ',
+          filePrefix: 'type${r + 1}',
+          index: r,
           etNote: note,
         ),
       );
@@ -215,20 +197,118 @@ List<ShotStep> buildWizard({
     return steps;
   }
 
-  for (var r = 1; r <= rimCount; r++) {
-    final label = rimCount == 1 ? 'Rim' : 'Rim type $r';
-    final filePrefix = (rimCount == 1)
+  final tireCount = category.includesTire ? c.tireTypes : 0;
+  for (var r = 0; r < rimCount; r++) {
+    final label = rimCount == 1 ? 'Rim' : 'Rim type ${r + 1}';
+    final filePrefix = rimCount == 1
         ? 'type1'
-        : (tireCount <= 1 ? 'type$r' : 'rim$r');
-    final note = r <= etNotes.length ? etNotes[r - 1] : null;
-    steps.addAll(_rimFaceSteps(prefix: '$label · ', filePrefix: filePrefix));
-    steps.add(
-      _etStep(prefix: '$label · ', filePrefix: filePrefix, etNote: note),
+        : (tireCount <= 1 ? 'type${r + 1}' : 'rim${r + 1}');
+    final note = r < etNotes.length ? etNotes[r] : null;
+    steps.addAll(
+      _rimTypeShots(
+        prefix: '$label · ',
+        filePrefix: filePrefix,
+        index: r,
+        etNote: note,
+      ),
     );
   }
-
   return steps;
 }
+
+/// Overall, then one loose piece when the listing has more than one.
+List<ShotStep> _leadShots({required int pieces}) => [
+      ShotStep(
+        id: 'set_overall',
+        title: pieces > 1 ? 'Set · overall' : 'Overall',
+        hint: pieces > 1
+            ? 'Stand back. The whole set, once.'
+            : 'Stand back. The whole piece, centered.',
+        guide: ShotGuide.overallFrame,
+      ),
+      if (pieces > 1)
+        const ShotStep(
+          id: 'piece_individual',
+          title: 'Individual piece',
+          hint: 'One piece out of the set, on its own.',
+          guide: ShotGuide.overallFrame,
+        ),
+    ];
+
+/// Dimensions, tread, then DOT. Every tire type's dials sit on that step.
+List<ShotStep> _tireShots() => const [
+      ShotStep(
+        id: 'tires_size',
+        title: 'Tire · dimensions',
+        hint: 'Sidewall size. Match the dials to the marking.',
+        preferTorch: true,
+        guide: ShotGuide.sidewallSize,
+        dials: ShotDials.tireSize,
+      ),
+      ShotStep(
+        id: 'tires_tread',
+        title: 'Tire · tread',
+        hint: 'Tread face. Depth in millimetres. Add a dial per axle.',
+        guide: ShotGuide.treadSurface,
+        dials: ShotDials.tread,
+      ),
+      ShotStep(
+        id: 'tires_dot',
+        title: 'Tire · DOT',
+        hint: 'DOT oval. Week and year.',
+        preferTorch: true,
+        guide: ShotGuide.dotCloseup,
+        dials: ShotDials.dot,
+      ),
+    ];
+
+List<ShotStep> _rimTypeShots({
+  required String prefix,
+  required String filePrefix,
+  required int index,
+  String? etNote,
+}) =>
+    [
+      ..._rimFaceShots(prefix: prefix, filePrefix: filePrefix, index: index),
+      _etShot(
+        prefix: prefix,
+        filePrefix: filePrefix,
+        index: index,
+        etNote: etNote,
+      ),
+    ];
+
+List<ShotStep> _rimFaceShots({
+  required String prefix,
+  required String filePrefix,
+  required int index,
+}) =>
+    [
+      ShotStep(
+        id: '${filePrefix}_rim_hub',
+        title: '${prefix}center hub',
+        hint: 'Center bore on the dot. Bolt holes stay inside the circle.',
+        guide: ShotGuide.centerHub,
+        dials: ShotDials.hub,
+        specIndex: index,
+      ),
+      ShotStep(
+        id: '${filePrefix}_rim_brand',
+        title: '${prefix}brand stamp',
+        hint: 'Maker stamp, filling the frame.',
+        preferTorch: true,
+        guide: ShotGuide.rimStamp,
+      ),
+      ShotStep(
+        id: '${filePrefix}_rim_size',
+        title: '${prefix}dimensions',
+        hint: 'Width and diameter stamp.',
+        preferTorch: true,
+        guide: ShotGuide.rimStamp,
+        dials: ShotDials.rimSize,
+        specIndex: index,
+      ),
+    ];
 
 /// Optional extras after the main wizard (imperfections, etc.).
 ShotStep extraShotStep(int index) => ShotStep(
@@ -240,81 +320,10 @@ ShotStep extraShotStep(int index) => ShotStep(
       isExtra: true,
     );
 
-List<ShotStep> _tireFullSteps({
+ShotStep _etShot({
   required String prefix,
   required String filePrefix,
-}) =>
-    [
-      ShotStep(
-        id: '${filePrefix}_tire_overall',
-        title: '${prefix}overall',
-        hint: 'Stand back. Capture the whole tire (and wheel if mounted). '
-            'Keep it centered and well lit.',
-        guide: ShotGuide.overallFrame,
-      ),
-      ..._tireDetailSteps(prefix: prefix, filePrefix: filePrefix),
-    ];
-
-List<ShotStep> _tireDetailSteps({
-  required String prefix,
-  required String filePrefix,
-}) =>
-    [
-      ShotStep(
-        id: '${filePrefix}_tire_surface',
-        title: '${prefix}tread / surface',
-        hint: 'Shoot the contact patch / tread face. Fill the frame with '
-            'tread so wear and damage are obvious.',
-        guide: ShotGuide.treadSurface,
-      ),
-      ShotStep(
-        id: '${filePrefix}_tire_dot',
-        title: '${prefix}DOT / date code',
-        hint: 'Close-up of the DOT oval (4-digit week/year, e.g. 0423). '
-            'Torch will turn on — hold steady.',
-        preferTorch: true,
-        guide: ShotGuide.dotCloseup,
-      ),
-      ShotStep(
-        id: '${filePrefix}_tire_size',
-        title: '${prefix}size marking',
-        hint: 'Sidewall size line, e.g. 225/40 ZR18 (92Y) EXTRA LOAD. '
-            'Make every character readable.',
-        preferTorch: true,
-        guide: ShotGuide.sidewallSize,
-      ),
-    ];
-
-List<ShotStep> _rimFaceSteps({
-  required String prefix,
-  required String filePrefix,
-}) =>
-    [
-      ShotStep(
-        id: '${filePrefix}_rim_overall',
-        title: '${prefix}overall',
-        hint: 'Whole rim face. Show spokes, finish, and any curb rash.',
-        guide: ShotGuide.overallFrame,
-      ),
-      ShotStep(
-        id: '${filePrefix}_rim_brand',
-        title: '${prefix}brand stamp',
-        hint: 'Close-up of maker stamp (e.g. Honda Motor Co., Ltd.).',
-        preferTorch: true,
-        guide: ShotGuide.rimStamp,
-      ),
-      ShotStep(
-        id: '${filePrefix}_rim_size',
-        title: '${prefix}size (width × diameter)',
-        hint: 'Stamp like 18x7 1/2J — width, diameter, flange.',
-        preferTorch: true,
-        guide: ShotGuide.rimStamp,
-      ),
-    ];
-
-ShotStep _etStep({
-  required String prefix,
-  required String filePrefix,
+  required int index,
   String? etNote,
 }) {
   final note = (etNote != null && etNote.trim().isNotEmpty)
@@ -327,14 +336,7 @@ ShotStep _etStep({
         'Fill the frame with the number.',
     preferTorch: true,
     guide: ShotGuide.rimStamp,
+    dials: ShotDials.et,
+    specIndex: index,
   );
 }
-
-List<ShotStep> _rimSteps({
-  required String prefix,
-  required String filePrefix,
-}) =>
-    [
-      ..._rimFaceSteps(prefix: prefix, filePrefix: filePrefix),
-      _etStep(prefix: prefix, filePrefix: filePrefix),
-    ];

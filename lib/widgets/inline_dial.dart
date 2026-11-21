@@ -12,6 +12,7 @@ class InlineDial<T> extends StatefulWidget {
     required this.labelOf,
     this.width = 64,
     this.height = 120,
+    this.reportLive = false,
   });
 
   final List<T> values;
@@ -20,6 +21,10 @@ class InlineDial<T> extends StatefulWidget {
   final String Function(T) labelOf;
   final double width;
   final double height;
+
+  /// Report the selected row while the wheel is still moving, so Next can
+  /// keep the value the user just landed on.
+  final bool reportLive;
 
   @override
   State<InlineDial<T>> createState() => _InlineDialState<T>();
@@ -116,7 +121,9 @@ class _InlineDialState<T> extends State<InlineDial<T>> {
           // rebuilds every dial on each tick (and on Save). A callback then
           // setStates the screen during that layout and the whole page goes red.
           // Commit only when the wheel stops, and never from inside a frame.
-          changeReportingBehavior: ChangeReportingBehavior.onScrollEnd,
+          changeReportingBehavior: widget.reportLive
+              ? ChangeReportingBehavior.onScrollUpdate
+              : ChangeReportingBehavior.onScrollEnd,
           onSelectedItemChanged: _onSelected,
           children: [
             for (final v in widget.values)

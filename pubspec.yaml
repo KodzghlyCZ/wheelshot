@@ -1,7 +1,7 @@
 name: wheelshot
 description: Guided tire and rim photo capture for inventory / sale docs.
 publish_to: "none"
-version: 1.1.5+7
+version: 1.1.6+8
 
 environment:
   sdk: ^3.5.0
