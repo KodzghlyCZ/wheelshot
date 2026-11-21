@@ -97,6 +97,12 @@ class ShootConfig {
   int get rimSpecSlots => rimTypes.clamp(1, 4);
   int get tireSpecSlots => tireTypes.clamp(1, 4);
 
+  /// One tread reading per physical tire of a type (4 pcs / 2 types → 2).
+  int get maxTreadDepthsPerType {
+    final types = tireTypes.clamp(1, 4);
+    return (pieceCount.clamp(1, 4) / types).ceil().clamp(1, 4);
+  }
+
   bool get needsSetupEtHints => etOnlyByAxis && rimTypes > 1;
 
   static ShootConfig preset4() =>
@@ -248,7 +254,7 @@ List<ShotStep> _tireShots() => const [
       ShotStep(
         id: 'tires_tread',
         title: 'Tire · tread',
-        hint: 'Tread face. Depth in millimetres. Add a dial per axle.',
+        hint: 'Tread face. Depth in millimetres. One dial per tire of this type.',
         guide: ShotGuide.treadSurface,
         dials: ShotDials.tread,
       ),

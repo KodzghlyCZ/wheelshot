@@ -517,6 +517,10 @@ class _WizardScreenState extends State<WizardScreen>
             _sensor = NativeDeviceOrientationReader.orientation(context);
             final turns = _hasPhoto ? 0 : _chromeTurns(_sensor);
             final showDials = turns == 0 && _step.dials != ShotDials.none;
+            final treadCap = widget.store.config
+                    ?.forCategory(widget.store.category)
+                    .maxTreadDepthsPerType ??
+                4;
             return SafeArea(
               child: Column(
                 children: [
@@ -529,6 +533,7 @@ class _WizardScreenState extends State<WizardScreen>
                         step: _step,
                         draft: _draft,
                         onChanged: () => setState(() {}),
+                        maxTreadDepths: treadCap,
                       ),
                     ),
                   _actions(turns),

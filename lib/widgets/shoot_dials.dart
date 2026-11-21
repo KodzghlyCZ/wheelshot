@@ -99,11 +99,15 @@ class ShootDialBody extends StatelessWidget {
     required this.step,
     required this.draft,
     required this.onChanged,
+    this.maxTreadDepths = 4,
   });
 
   final ShotStep step;
   final SpecDraft draft;
   final VoidCallback onChanged;
+
+  /// Cap on tread dials per tire type (pieces ÷ types).
+  final int maxTreadDepths;
 
   @override
   Widget build(BuildContext context) {
@@ -191,8 +195,10 @@ class ShootDialBody extends StatelessWidget {
 
   Widget _treadRow(int i) {
     final t = draft.tires[i];
+    final cap = maxTreadDepths.clamp(1, 4);
     final label =
         draft.tires.length > 1 ? 'Tread · type ${i + 1}' : 'Tread depth (mm)';
+    final canAdd = t.treadDepths.length < cap;
     return DialStrip(
       label: label,
       manualHint: 'e.g. 6.0, 4.5',
@@ -201,7 +207,8 @@ class ShootDialBody extends StatelessWidget {
       onManualChanged: (v) {
         if (v == null) return;
         final nums = _parseDepths(v);
-        if (nums != null) _set(() => t.treadDepths = nums);
+        if (nums == null) return;
+        _set(() => t.treadDepths = nums.take(cap).toList());
       },
       children: [
         for (var d = 0; d < t.treadDepths.length; d++) ...[
@@ -215,14 +222,15 @@ class ShootDialBody extends StatelessWidget {
             reportLive: true,
           ),
         ],
-        IconButton(
-          tooltip: 'Add tread depth',
-          onPressed: () => _set(() {
-            final seed = t.treadDepths.isEmpty ? 3.0 : t.treadDepths.last;
-            t.treadDepths.add(seed);
-          }),
-          icon: const Icon(Icons.add),
-        ),
+        if (canAdd)
+          IconButton(
+            tooltip: 'Add tread depth',
+            onPressed: () => _set(() {
+              final seed = t.treadDepths.isEmpty ? 3.0 : t.treadDepths.last;
+              if (t.treadDepths.length < cap) t.treadDepths.add(seed);
+            }),
+            icon: const Icon(Icons.add),
+          ),
       ],
     );
   }

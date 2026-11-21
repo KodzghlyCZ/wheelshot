@@ -1,6 +1,7 @@
 import 'dart:ui';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:wheelshot/models/shoot_plan.dart';
 import 'package:wheelshot/vision/dot_ocr.dart';
 
 void main() {
@@ -28,12 +29,23 @@ void main() {
     expect(pickDotDate('Plant Code 0312')?.label, '0312');
   });
 
-  test('aim oval matches mid-frame 4-digit guide', () {
+  test('aim stadium is ~3.2:1 mid-frame', () {
     final r = dotAimRect(const Size(1000, 1000));
     expect(r.center.dx, 500);
     expect(r.center.dy, 520);
-    expect(r.width, 680);
-    expect(r.height, 220);
+    expect(r.width, 700);
+    expect(r.height, closeTo(700 / 3.2, 0.01));
+  });
+
+  test('max tread depths is pieces per type', () {
+    expect(
+      const ShootConfig(pieceCount: 4, tireTypes: 2).maxTreadDepthsPerType,
+      2,
+    );
+    expect(
+      const ShootConfig(pieceCount: 4, tireTypes: 1).maxTreadDepthsPerType,
+      4,
+    );
   });
 
   test('hold settles a new date', () {

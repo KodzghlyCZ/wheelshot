@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../vision/dot_ocr.dart';
 
-/// Guide oval for the DOT date stamp. Caption shows the settled WWYY.
+/// Guide for the DOT date stamp — stadium with flat edges, not a soft oval.
 class DotAimOverlayPainter extends CustomPainter {
   const DotAimOverlayPainter(this.date);
 
@@ -15,7 +15,12 @@ class DotAimOverlayPainter extends CustomPainter {
       ..color = const Color(0xCCFFFFFF)
       ..style = PaintingStyle.stroke
       ..strokeWidth = 2;
-    canvas.drawOval(rect, guide);
+    // Fully round short ends → flat top/bottom like the embossed DOT frame.
+    final stadium = RRect.fromRectAndRadius(
+      rect,
+      Radius.circular(rect.height / 2),
+    );
+    canvas.drawRRect(stadium, guide);
 
     final label = date == null ? '4 digits' : date!.label;
     final tp = TextPainter(

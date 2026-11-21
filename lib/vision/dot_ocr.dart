@@ -86,12 +86,13 @@ DotDate? pickDotDate(String raw) {
   return all.last;
 }
 
-/// Same oval as [DotAimOverlayPainter] — OCR only feeds this crop to ML Kit.
+/// Stadium frame for the DOT date stamp (~3.2:1, flat top/bottom).
+/// OCR crops this same rect on the upright frame.
 Rect dotAimRect(Size size) {
+  final width = size.width * 0.70;
+  final height = width / 3.2;
   final center = Offset(size.width / 2, size.height * 0.52);
-  final rx = size.width * 0.34;
-  final ry = size.height * 0.11;
-  return Rect.fromCenter(center: center, width: rx * 2, height: ry * 2);
+  return Rect.fromCenter(center: center, width: width, height: height);
 }
 
 /// Holds a DOT date until a different one repeats.

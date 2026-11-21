@@ -31,6 +31,8 @@ class _SpecsScreenState extends State<SpecsScreen> {
 
   ShootCategory get _cat => widget.store.category;
   ShootConfig? get _config => widget.store.config;
+  int get _maxTreadDepths =>
+      _config?.forCategory(_cat).maxTreadDepthsPerType ?? 4;
 
   static final _treadValues = [
     for (var t = 0; t <= 20; t++) t / 2,
@@ -688,14 +690,16 @@ class _SpecsScreenState extends State<SpecsScreen> {
                 }),
               ),
             ],
-            IconButton(
-              tooltip: 'Add tread depth',
-              onPressed: () => setState(() {
-                c.treadDepths.add(c.treadDepths.last);
-                c.treadManual = null;
-              }),
-              icon: const Icon(Icons.add),
-            ),
+            if (c.treadDepths.length < _maxTreadDepths)
+              IconButton(
+                tooltip: 'Add tread depth',
+                onPressed: () => setState(() {
+                  if (c.treadDepths.length >= _maxTreadDepths) return;
+                  c.treadDepths.add(c.treadDepths.last);
+                  c.treadManual = null;
+                }),
+                icon: const Icon(Icons.add),
+              ),
           ],
         ),
         const SizedBox(height: 12),
