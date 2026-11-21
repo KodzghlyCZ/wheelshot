@@ -255,7 +255,6 @@ class _WizardScreenState extends State<WizardScreen>
         .analyze(
       image,
       sensorOrientation: controller.description.sensorOrientation,
-      deviceOrientation: _captureOrientation(_sensor),
     )
         .then((found) {
       if (!mounted || _step.dials != ShotDials.dot) return;

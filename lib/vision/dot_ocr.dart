@@ -1,7 +1,10 @@
+import 'dart:ui';
+
 import 'package:camera/camera.dart';
 import 'package:flutter/foundation.dart';
-import 'package:flutter/services.dart';
 import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
+
+import 'bolt_pattern.dart';
 
 /// Four-digit DOT date: week 01–53, year 00–26 (matches the shoot dials).
 class DotDate {
@@ -83,7 +86,7 @@ DotDate? pickDotDate(String raw) {
   return all.last;
 }
 
-/// Same oval as [DotAimOverlayPainter] — OCR only accepts text inside this.
+/// Same oval as [DotAimOverlayPainter] — OCR only feeds this crop to ML Kit.
 Rect dotAimRect(Size size) {
   final center = Offset(size.width / 2, size.height * 0.52);
   final rx = size.width * 0.34;
@@ -140,28 +143,52 @@ class DotOcr {
 
   Future<void> dispose() => _recognizer.close();
 
-  /// Null when a previous frame is still running or the buffer is unusable.
+  /// Crops the upright aim oval, then OCR — ignores the rest of the frame.
   Future<DotDate?> analyze(
     CameraImage image, {
     required int sensorOrientation,
-    required DeviceOrientation deviceOrientation,
   }) async {
     if (_busy) return null;
     _busy = true;
     try {
-      final input = _inputImage(
-        image,
-        sensorOrientation: sensorOrientation,
-        deviceOrientation: deviceOrientation,
+      final plane = image.planes.first;
+      final packed = _packY(
+        plane.bytes,
+        image.width,
+        image.height,
+        plane.bytesPerRow,
       );
-      if (input == null) return null;
-      return await _recognize(
-        input,
-        imageSize: Size(
-          image.width.toDouble(),
-          image.height.toDouble(),
+      // Same upright transform as bolt pattern / CameraPreview.
+      final upright = rotateLuma(
+        packed,
+        image.width,
+        image.height,
+        sensorOrientation,
+      );
+      final aim = dotAimRect(
+        Size(upright.width.toDouble(), upright.height.toDouble()),
+      );
+      var crop = _cropLuma(upright.bytes, upright.width, upright.height, aim);
+      if (crop == null) return null;
+      // Embossed digits need pixels; upscale tiny crops.
+      if (crop.width < 400) {
+        crop = _scale2x(crop.bytes, crop.width, crop.height);
+      }
+      final nv21 = _lumaToNv21(crop.bytes, crop.width, crop.height);
+      final input = InputImage.fromBytes(
+        bytes: nv21,
+        metadata: InputImageMetadata(
+          size: Size(crop.width.toDouble(), crop.height.toDouble()),
+          rotation: InputImageRotation.rotation0deg,
+          format: InputImageFormat.nv21,
+          bytesPerRow: crop.width,
         ),
       );
+      return await _recognize(input);
+    } catch (e, st) {
+      // ignore: avoid_print
+      print('DotOcr analyze $e\n$st');
+      return null;
     } finally {
       _busy = false;
     }
@@ -174,137 +201,86 @@ class DotOcr {
     _busy = true;
     try {
       final input = InputImage.fromFilePath(path);
-      return await _recognize(input, frameOnly: true);
+      return await _recognize(input);
+    } catch (e, st) {
+      // ignore: avoid_print
+      print('DotOcr file $e\n$st');
+      return null;
     } finally {
       _busy = false;
     }
   }
 
-  Future<DotDate?> _recognize(
-    InputImage input, {
-    Size? imageSize,
-    bool frameOnly = false,
-  }) async {
-    try {
-      final recognized = await _recognizer.processImage(input);
-      return _pickFromRecognized(
-        recognized,
-        imageSize: imageSize,
-        frameOnly: frameOnly,
-      );
-    } catch (e, st) {
-      debugPrint('DotOcr $e\n$st');
-      return null;
+  Future<DotDate?> _recognize(InputImage input) async {
+    final recognized = await _recognizer.processImage(input);
+    final raw = recognized.text.trim();
+    if (raw.isNotEmpty) {
+      // ignore: avoid_print
+      print('DotOcr raw=$raw');
     }
-  }
-
-  /// Only WWYY whose line center sits in the aim oval (live), or whole
-  /// recognition when [frameOnly] (already-cropped still).
-  DotDate? _pickFromRecognized(
-    RecognizedText text, {
-    Size? imageSize,
-    bool frameOnly = false,
-  }) {
-    if (text.text.trim().isEmpty) return null;
-
-    if (frameOnly || imageSize == null) {
-      return pickDotDate(text.text);
-    }
-
-    final aim = dotAimRect(imageSize);
-    DotDate? bestInAim;
-    var bestArea = double.infinity;
-    for (final block in text.blocks) {
-      for (final line in block.lines) {
-        final box = line.boundingBox;
-        final picked = pickDotDate(line.text);
-        if (picked == null) continue;
-        final center = box.center;
-        if (!aim.contains(center)) continue;
-        final area = box.width * box.height;
-        if (area < bestArea) {
-          bestArea = area;
-          bestInAim = picked;
-        }
-      }
-    }
-    return bestInAim;
-  }
-
-  InputImage? _inputImage(
-    CameraImage image, {
-    required int sensorOrientation,
-    required DeviceOrientation deviceOrientation,
-  }) {
-    final rotation = _rotation(sensorOrientation, deviceOrientation);
-    if (rotation == null) return null;
-
-    final nv21 = _yuv420ToNv21(image);
-    if (nv21 == null) return null;
-
-    return InputImage.fromBytes(
-      bytes: nv21,
-      metadata: InputImageMetadata(
-        size: Size(image.width.toDouble(), image.height.toDouble()),
-        rotation: rotation,
-        format: InputImageFormat.nv21,
-        bytesPerRow: image.width,
-      ),
-    );
-  }
-
-  InputImageRotation? _rotation(
-    int sensorOrientation,
-    DeviceOrientation deviceOrientation,
-  ) {
-    const map = {
-      DeviceOrientation.portraitUp: 0,
-      DeviceOrientation.landscapeLeft: 90,
-      DeviceOrientation.portraitDown: 180,
-      DeviceOrientation.landscapeRight: 270,
-    };
-    final compensation = map[deviceOrientation];
-    if (compensation == null) return null;
-    // Back camera.
-    final degrees = (sensorOrientation - compensation + 360) % 360;
-    return InputImageRotationValue.fromRawValue(degrees);
+    return pickDotDate(raw);
   }
 }
 
-/// Pack YUV_420_888 planes into a single NV21 buffer for ML Kit.
-Uint8List? _yuv420ToNv21(CameraImage image) {
-  if (image.planes.length < 3) {
-    if (image.planes.length == 1) return image.planes.first.bytes;
-    return null;
+Uint8List _packY(Uint8List bytes, int width, int height, int stride) {
+  final out = Uint8List(width * height);
+  final row = stride <= 0 ? width : stride;
+  for (var y = 0; y < height; y++) {
+    final from = y * row;
+    if (from + width > bytes.length) break;
+    out.setRange(y * width, y * width + width, bytes, from);
   }
-  final width = image.width;
-  final height = image.height;
-  final yPlane = image.planes[0];
-  final uPlane = image.planes[1];
-  final vPlane = image.planes[2];
-  final yRowStride = yPlane.bytesPerRow;
-  final uvRowStride = uPlane.bytesPerRow;
-  final uvPixelStride = uPlane.bytesPerRow == width
-      ? 1
-      : uPlane.bytesPerPixel ?? 2;
+  return out;
+}
 
-  final out = Uint8List(width * height + width * height ~/ 2);
-  var o = 0;
-  for (var row = 0; row < height; row++) {
-    final start = row * yRowStride;
-    out.setRange(o, o + width, yPlane.bytes, start);
-    o += width;
+({Uint8List bytes, int width, int height})? _cropLuma(
+  Uint8List src,
+  int width,
+  int height,
+  Rect aim,
+) {
+  var left = aim.left.floor().clamp(0, width - 2).toInt() & ~1;
+  var top = aim.top.floor().clamp(0, height - 2).toInt() & ~1;
+  final right = aim.right.ceil().clamp(left + 2, width).toInt();
+  final bottom = aim.bottom.ceil().clamp(top + 2, height).toInt();
+  var cw = (right - left) & ~1;
+  var ch = (bottom - top) & ~1;
+  if (cw < 32 || ch < 16) return null;
+  if (left + cw > width) cw = (width - left) & ~1;
+  if (top + ch > height) ch = (height - top) & ~1;
+  final out = Uint8List(cw * ch);
+  for (var y = 0; y < ch; y++) {
+    final from = (top + y) * width + left;
+    out.setRange(y * cw, y * cw + cw, src, from);
   }
+  return (bytes: out, width: cw, height: ch);
+}
 
-  final uvHeight = height ~/ 2;
-  final uvWidth = width ~/ 2;
-  for (var row = 0; row < uvHeight; row++) {
-    for (var col = 0; col < uvWidth; col++) {
-      final uvIndex = row * uvRowStride + col * uvPixelStride;
-      // NV21 is VU interleaved.
-      out[o++] = vPlane.bytes[uvIndex];
-      out[o++] = uPlane.bytes[uvIndex];
+({Uint8List bytes, int width, int height}) _scale2x(
+  Uint8List src,
+  int width,
+  int height,
+) {
+  final w2 = width * 2;
+  final h2 = height * 2;
+  final out = Uint8List(w2 * h2);
+  for (var y = 0; y < height; y++) {
+    for (var x = 0; x < width; x++) {
+      final v = src[y * width + x];
+      final o = (y * 2) * w2 + x * 2;
+      out[o] = v;
+      out[o + 1] = v;
+      out[o + w2] = v;
+      out[o + w2 + 1] = v;
     }
   }
+  return (bytes: out, width: w2, height: h2);
+}
+
+/// NV21 with neutral chroma — ML Kit text only needs luma.
+Uint8List _lumaToNv21(Uint8List y, int width, int height) {
+  final out = Uint8List(width * height + width * height ~/ 2);
+  out.setRange(0, y.length, y);
+  out.fillRange(y.length, out.length, 128);
   return out;
 }
