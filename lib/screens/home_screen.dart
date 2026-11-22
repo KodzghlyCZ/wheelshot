@@ -8,7 +8,6 @@ import '../services/app_update.dart';
 import '../services/session_store.dart';
 import '../widgets/past_shoot_strip.dart';
 import '../widgets/update_available_button.dart';
-import 'bolt_pattern_screen.dart';
 import 'past_shoots_screen.dart';
 import 'setup_screen.dart';
 
@@ -156,17 +155,6 @@ class _HomeScreenState extends State<HomeScreen>
                 ),
                 const SizedBox(height: 12),
               ],
-              const SizedBox(height: 4),
-              OutlinedButton.icon(
-                onPressed: () {
-                  Navigator.of(context).push(
-                    MaterialPageRoute(
-                        builder: (_) => const BoltPatternScreen()),
-                  );
-                },
-                icon: const Icon(Icons.adjust),
-                label: const Text('Bolt pattern'),
-              ),
               const SizedBox(height: 16),
               Text(
                 'Past shoots',
