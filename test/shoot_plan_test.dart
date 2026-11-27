@@ -30,14 +30,16 @@ void main() {
     expect(steps[8].dials, ShotDials.et);
   });
 
-  test('2 tire types share one size step and one DOT step', () {
+  test('2 tire types get separate size/tread/DOT shoots', () {
     final steps = buildWizard(
       category: ShootCategory.wheelSet,
       config: const ShootConfig(pieceCount: 4, tireTypes: 2, rimTypes: 1),
     );
-    expect(steps.where((s) => s.dials == ShotDials.tireSize).length, 1);
-    expect(steps.where((s) => s.dials == ShotDials.tread).length, 1);
-    expect(steps.where((s) => s.dials == ShotDials.dot).length, 1);
+    expect(steps.where((s) => s.dials == ShotDials.tireSize).length, 2);
+    expect(steps.where((s) => s.dials == ShotDials.tread).length, 2);
+    expect(steps.where((s) => s.dials == ShotDials.dot).length, 2);
+    expect(steps.firstWhere((s) => s.id == 'tire1_tread').specIndex, 0);
+    expect(steps.firstWhere((s) => s.id == 'tire2_tread').specIndex, 1);
     expect(steps.where((s) => s.id.endsWith('rim_et')).length, 1);
   });
 
@@ -91,7 +93,7 @@ void main() {
     expect(steps[1].id, 'piece_individual');
   });
 
-  test('tires only: overall, piece, size, DOT', () {
+  test('tires only with 2 types: tread shoot per type', () {
     final steps = buildWizard(
       category: ShootCategory.tiresOnly,
       config: const ShootConfig(pieceCount: 3, tireTypes: 2, rimTypes: 3),
@@ -101,14 +103,17 @@ void main() {
       [
         'set_overall',
         'piece_individual',
-        'tires_size',
-        'tires_tread',
-        'tires_dot',
+        'tire1_size',
+        'tire1_tread',
+        'tire1_dot',
+        'tire2_size',
+        'tire2_tread',
+        'tire2_dot',
       ],
     );
   });
 
-  test('spare is overall, size, DOT, and a rim block when mounted', () {
+  test('spare is overall, size, tread, DOT, and a rim block when mounted', () {
     final bare = buildWizard(category: ShootCategory.spare, spareHasRim: false);
     expect(
       bare.map((s) => s.id).toList(),

@@ -235,17 +235,11 @@ class RimDraft {
 void commitStep(SpecDraft draft, ShotStep step) {
   switch (step.dials) {
     case ShotDials.tireSize:
-      for (final t in draft.tires) {
-        t.keepSize();
-      }
+      _tireAt(draft, step.specIndex)?.keepSize();
     case ShotDials.tread:
-      for (final t in draft.tires) {
-        t.keepTread();
-      }
+      _tireAt(draft, step.specIndex)?.keepTread();
     case ShotDials.dot:
-      for (final t in draft.tires) {
-        t.keepDot();
-      }
+      _tireAt(draft, step.specIndex)?.keepDot();
     case ShotDials.hub:
       final rim = _rimAt(draft, step.specIndex);
       rim?.keepHub();
@@ -263,17 +257,14 @@ void commitStep(SpecDraft draft, ShotStep step) {
 void discardStep(SpecDraft draft, ShotStep step, {String? restoreEt}) {
   switch (step.dials) {
     case ShotDials.tireSize:
-      for (final t in draft.tires) {
-        t.sizeOut = '';
-      }
+      final t = _tireAt(draft, step.specIndex);
+      if (t != null) t.sizeOut = '';
     case ShotDials.tread:
-      for (final t in draft.tires) {
-        t.treadOut = '';
-      }
+      final t = _tireAt(draft, step.specIndex);
+      if (t != null) t.treadOut = '';
     case ShotDials.dot:
-      for (final t in draft.tires) {
-        t.dotOut = '';
-      }
+      final t = _tireAt(draft, step.specIndex);
+      if (t != null) t.dotOut = '';
     case ShotDials.hub:
       final rim = _rimAt(draft, step.specIndex);
       if (rim != null) {
@@ -295,6 +286,11 @@ void discardStep(SpecDraft draft, ShotStep step, {String? restoreEt}) {
 RimDraft? _rimAt(SpecDraft draft, int index) {
   if (index < 0 || index >= draft.rims.length) return null;
   return draft.rims[index];
+}
+
+TireDraft? _tireAt(SpecDraft draft, int index) {
+  if (index < 0 || index >= draft.tires.length) return null;
+  return draft.tires[index];
 }
 
 String _mm(double d) => d == d.roundToDouble()

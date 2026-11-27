@@ -261,7 +261,9 @@ class _WizardScreenState extends State<WizardScreen>
       final shown = _dotHold.push(found);
       var wrote = false;
       if (shown != null) {
-        for (final t in _draft.tires) {
+        final i = _step.specIndex;
+        if (i >= 0 && i < _draft.tires.length) {
+          final t = _draft.tires[i];
           if (t.dotWeek != shown.week || t.dotYear != shown.year) {
             t.dotWeek = shown.week;
             t.dotYear = shown.year;

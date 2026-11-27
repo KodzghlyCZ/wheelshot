@@ -137,17 +137,14 @@ class ShootDialBody extends StatelessWidget {
   }
 
   Widget _tires({required bool size}) {
-    return Column(
-      children: [
-        for (var i = 0; i < draft.tires.length; i++)
-          size ? _tireSize(i) : _dot(i),
-      ],
-    );
+    final i = step.specIndex;
+    if (i < 0 || i >= draft.tires.length) return const SizedBox.shrink();
+    return size ? _tireSize(i) : _dot(i);
   }
 
   Widget _tireSize(int i) {
     final t = draft.tires[i];
-    final selector = TireSizeSelector(
+    return TireSizeSelector(
       prefix: t.prefix,
       width: t.width,
       aspect: t.aspect,
@@ -175,29 +172,20 @@ class ShootDialBody extends StatelessWidget {
           ? () => _set(() => _copyTire(t, draft.tires[i + 1]))
           : null,
     );
-    if (draft.tires.length < 2) return selector;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Text('Type ${i + 1}'),
-        selector,
-      ],
-    );
   }
 
   Widget _tread() {
-    return Column(
-      children: [
-        for (var i = 0; i < draft.tires.length; i++) _treadRow(i),
-      ],
-    );
+    final i = step.specIndex;
+    if (i < 0 || i >= draft.tires.length) return const SizedBox.shrink();
+    return _treadRow(i);
   }
 
   Widget _treadRow(int i) {
     final t = draft.tires[i];
     final cap = maxTreadDepths.clamp(1, 4);
-    final label =
-        draft.tires.length > 1 ? 'Tread · type ${i + 1}' : 'Tread depth (mm)';
+    final label = draft.tires.length > 1
+        ? 'Tread depth · type ${i + 1} (mm)'
+        : 'Tread depth (mm)';
     final canAdd = t.treadDepths.length < cap;
     return DialStrip(
       label: label,
@@ -237,7 +225,8 @@ class ShootDialBody extends StatelessWidget {
 
   Widget _dot(int i) {
     final t = draft.tires[i];
-    final label = draft.tires.length > 1 ? 'DOT · type ${i + 1}' : 'DOT';
+    final label =
+        draft.tires.length > 1 ? 'DOT · type ${i + 1}' : 'DOT';
     return DialStrip(
       label: label,
       manualHint: 'e.g. 2323',

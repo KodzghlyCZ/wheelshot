@@ -147,7 +147,7 @@ class ShotStep {
   /// Which spec dials sit under the preview. [none] is photo only.
   final ShotDials dials;
 
-  /// Rim type index for [ShotDials.hub], [ShotDials.rimSize], and [ShotDials.et].
+  /// Type index for rim dials and per-type tire dials.
   final int specIndex;
 }
 
@@ -170,7 +170,7 @@ List<ShotStep> buildWizard({
   if (category == ShootCategory.spare) {
     final steps = <ShotStep>[
       ..._leadShots(pieces: 1),
-      ..._tireShots(),
+      ..._tireShots(tireTypes: 1),
     ];
     if (spareHasRim) {
       steps.addAll(_rimTypeShots(prefix: 'Rim · ', filePrefix: '01', index: 0));
@@ -181,7 +181,9 @@ List<ShotStep> buildWizard({
   final c = config.forCategory(category);
   final steps = <ShotStep>[..._leadShots(pieces: c.pieceCount)];
 
-  if (category.includesTire) steps.addAll(_tireShots());
+  if (category.includesTire) {
+    steps.addAll(_tireShots(tireTypes: c.tireTypes));
+  }
   if (!category.includesRim) return steps;
 
   final rimCount = c.rimTypes;
@@ -241,32 +243,51 @@ List<ShotStep> _leadShots({required int pieces}) => [
         ),
     ];
 
-/// Dimensions, tread, then DOT. Every tire type's dials sit on that step.
-List<ShotStep> _tireShots() => const [
+/// Dimensions, tread, then DOT — one shoot block per tire type.
+List<ShotStep> _tireShots({required int tireTypes}) {
+  final n = tireTypes.clamp(1, 4);
+  final steps = <ShotStep>[];
+  for (var t = 0; t < n; t++) {
+    final multi = n > 1;
+    final label = multi ? 'Tire type ${t + 1}' : 'Tire';
+    final fp = multi ? 'tire${t + 1}' : 'tires';
+    steps.addAll([
       ShotStep(
-        id: 'tires_size',
-        title: 'Tire · dimensions',
-        hint: 'Sidewall size. Match the dials to the marking.',
+        id: '${fp}_size',
+        title: '$label · dimensions',
+        hint: multi
+            ? 'Sidewall size for type ${t + 1}. Match the dials.'
+            : 'Sidewall size. Match the dials to the marking.',
         preferTorch: true,
         guide: ShotGuide.sidewallSize,
         dials: ShotDials.tireSize,
+        specIndex: t,
       ),
       ShotStep(
-        id: 'tires_tread',
-        title: 'Tire · tread',
-        hint: 'Tread face. Depth in millimetres. One dial per tire of this type.',
+        id: '${fp}_tread',
+        title: '$label · tread',
+        hint: multi
+            ? 'Tread face for type ${t + 1}. Depth in millimetres.'
+            : 'Tread face. Depth in millimetres. One dial per tire.',
         guide: ShotGuide.treadSurface,
         dials: ShotDials.tread,
+        specIndex: t,
       ),
       ShotStep(
-        id: 'tires_dot',
-        title: 'Tire · DOT',
-        hint: 'DOT oval. Week and year.',
+        id: '${fp}_dot',
+        title: '$label · DOT',
+        hint: multi
+            ? 'DOT oval for type ${t + 1}. Week and year.'
+            : 'DOT oval. Week and year.',
         preferTorch: true,
         guide: ShotGuide.dotCloseup,
         dials: ShotDials.dot,
+        specIndex: t,
       ),
-    ];
+    ]);
+  }
+  return steps;
+}
 
 List<ShotStep> _rimTypeShots({
   required String prefix,
